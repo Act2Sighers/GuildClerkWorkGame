@@ -103,6 +103,7 @@ function spawnParty(slot) {
   say(slot.party, LINES.arrive);
   S.stats.visitors++;
   toast(`窓口${slot.i + 1}：${slot.party.name}が受注の申請に来ました`);
+  SFX.bell();
 }
 
 function setLeaving(slot, lines) {
@@ -121,7 +122,7 @@ function freeSlot(slot) {
 function approve(slot) {
   const p = slot.party; if (!p || slot.state !== 'reception') return;
   const probs = problemsOf(p.ev);
-  S.stats.approved++;
+  S.stats.approved++; p.decision = 'approve'; SFX.stamp();
   if (probs.length) {
     p.mistakes++; p.wrongApproval = true; S.stats.approveWrong++;
     toast(`窓口${slot.i + 1}：誤った認可です（本来は却下：${reasonText(probs)}）`, 'bad');
@@ -150,7 +151,7 @@ function reject(slot) {
   const chosen = REASONS.filter(r => p.checks[r.id]).map(r => r.id);
   if (!chosen.length) return;
   const probs = problemsOf(p.ev);
-  S.stats.rejected++;
+  S.stats.rejected++; p.decision = 'reject'; SFX.stamp();
   if (!probs.length) {
     S.stats.rejectWrong++;
     toast(`窓口${slot.i + 1}：誤った却下です。このパーティは受注して問題ありませんでした`, 'bad');
@@ -174,6 +175,7 @@ function reject(slot) {
 
 function earn(hq, owner) {
   S.gold += hq + owner; S.stats.incomeHQ += hq; S.stats.incomeOwner += owner;
+  if (hq + owner > 0) { goldPop(hq + owner); SFX.coin(); }
 }
 
 function partyReturns(slot) {
@@ -183,6 +185,7 @@ function partyReturns(slot) {
   if (p.outcome === 'success') S.stats.success++; else S.stats.fail++;
   say(p, p.outcome === 'success' ? LINES.returnOk : LINES.returnFail, 4);
   toast(`窓口${slot.i + 1}：${p.name}が帰還しました（${p.outcome === 'success' ? 'クエスト完了' : '全滅・クエスト失敗'}）`);
+  SFX.back();
 }
 
 /* 手当 */
@@ -190,24 +193,24 @@ function takeItem(kind) {
   const slot = selSlot(); const p = slot.party;
   if (slot.state !== 'returned' || !p || p.stamped) return;
   if (S.stock[kind] <= 0) { toast(`棚に${ITEM_NAME[kind]}がありません`, 'bad'); return; }
-  S.stock[kind]--; p.counter.push({ kind, tagged: false });
+  S.stock[kind]--; p.counter.push({ kind, tagged: false }); SFX.clink();
 }
 function clickItem(idx) {
   const slot = selSlot(); const p = slot.party;
   if (slot.state !== 'returned' || !p || p.stamped) return;
   const it = p.counter[idx]; if (!it) return;
-  if (S.hand === 'tag') { it.tagged = true; return; }
-  p.counter.splice(idx, 1); S.stock[it.kind]++;
+  if (S.hand === 'tag') { if (!it.tagged) { it.tagged = true; SFX.tag(); } return; }
+  p.counter.splice(idx, 1); S.stock[it.kind]++; SFX.soft();
 }
 function toggleTag() {
   const slot = selSlot();
   if (S.hand !== 'tag' && (slot.state !== 'returned' || !slot.party || slot.party.stamped)) return;
-  S.hand = S.hand === 'tag' ? null : 'tag';
+  S.hand = S.hand === 'tag' ? null : 'tag'; SFX.grab();
 }
 function stamp() {
   const slot = selSlot(); const p = slot.party;
   if (slot.state !== 'returned' || !p || p.stamped) return;
-  p.stamped = true; S.hand = null;
+  p.stamped = true; S.hand = null; SFX.stamp();
   const need = { gel: p.members.filter(m => m.status === 'hurt').length, elixir: p.members.filter(m => m.status === 'ghost').length };
   const got = { gel: p.counter.filter(c => c.kind === 'gel').length, elixir: p.counter.filter(c => c.kind === 'elixir').length };
   const miss = [];
@@ -239,10 +242,11 @@ function closeBusiness() {
     if (s.state === 'reception') { S.stats.closedAway++; setLeaving(s, LINES.closed); }
   }
   toast('営業終了。帰還したパーティの対応を終えるまで受付は続きます');
+  SFX.close(); showScene('営業終了', S.slots.some(s => s.state === 'returned') ? '残りの手当を済ませましょう' : '');
 }
 function endDay() {
   S.phase = 'report'; S.hand = null;
-  showReport();
+  showReport(); SFX.fanfare();
 }
 function startDay() {
   S.clock = CFG.OPEN; S.phase = 'business'; S.stats = newStats();
@@ -254,6 +258,7 @@ function startDay() {
   S.stats.carriedIn = carried;
   S.stats.returned -= carried; // 前日分の帰還は「持ち越し」として別に数える
   toast(`${S.day}日目の営業を開始します`);
+  SFX.open(); showScene(`${S.day}日目　営業開始`, '6:00');
 }
 
 /* ---------- 早朝・深夜 ---------- */
@@ -269,17 +274,18 @@ function toMorning() {
     if (n) S.packages.push({ kind, n, left: n, type: PACK_OF[n], open: false });
   }
   S.order = null;
+  showScene(`${S.day}日目　早朝`, S.packages.length ? '荷物が届いています' : '');
   toast(S.packages.length ? `${S.day}日目の朝。昨夜注文した支給品が届いています` : `${S.day}日目の朝。届いた荷物はありません`);
 }
 function clickPackage(pk) {
-  if (!pk.open) { pk.open = true; return; }
+  if (!pk.open) { pk.open = true; SFX.creak(); return; }
   if (pk.left > 0) { toast('中身を棚に並べ終えてから片付けます', 'bad'); return; }
-  S.packages = S.packages.filter(x => x !== pk);
+  S.packages = S.packages.filter(x => x !== pk); SFX.thump();
 }
 function unpackOne(pk) {
   if (!pk.open || pk.left <= 0) return;
   if (S.stock[pk.kind] >= CFG.SHELF_MAX) { toast(`棚の${ITEM_NAME[pk.kind]}がいっぱいです`, 'bad'); return; }
-  pk.left--; S.stock[pk.kind]++;
+  pk.left--; S.stock[pk.kind]++; SFX.clink();
 }
 function openBusiness() {
   if (S.phase !== 'morning') return;
@@ -289,17 +295,18 @@ function openBusiness() {
 function toNight() {
   S.phase = 'night'; S.clock = CFG.CLOSE + 10; S.hand = null; S.sheet = null; S.ordered = null;
   $('#reportOv').hidden = true;
+  SFX.night(); showScene('深夜', '明日の準備をして休みます');
 }
 // 注文書
-function newSheet() { if (S.ordered || S.sheet) return; S.sheet = { gel: 0, elixir: 0 }; }
-function cancelSheet() { S.sheet = null; if (typeof S.hand === 'number') S.hand = null; }
-function discardSheet() { S.sheet = { gel: 0, elixir: 0 }; toast('注文書を捨てて、新しい用紙を出しました'); }
-function grabStamp(n) { if (S.ordered) return; S.hand = S.hand === n ? null : n; }
+function newSheet() { if (S.ordered || S.sheet) return; S.sheet = { gel: 0, elixir: 0 }; SFX.paper(); }
+function cancelSheet() { S.sheet = null; if (typeof S.hand === 'number') S.hand = null; SFX.paper(); }
+function discardSheet() { S.sheet = { gel: 0, elixir: 0 }; SFX.paper(); toast('注文書を捨てて、新しい用紙を出しました'); }
+function grabStamp(n) { if (S.ordered) return; S.hand = S.hand === n ? null : n; SFX.grab(); }
 function stampSlot(kind) {
   if (!S.sheet) return;
   if (typeof S.hand !== 'number') { toast('先に「2」「5」「10」のハンコを手に取ります'); return; }
   if (S.sheet[kind]) { toast('この枠にはもう押してあります。書き直すなら注文書を捨てます', 'bad'); return; }
-  S.sheet[kind] = S.hand;
+  S.sheet[kind] = S.hand; SFX.stamp();
 }
 const sheetCost = sh => KINDS.reduce((a, k) => a + sh[k] * CFG.PRICE[k], 0);
 function sendOrder() {
@@ -313,6 +320,7 @@ function sendOrder() {
   const cost = sheetCost(sh);
   if (cost > S.gold) { toast(`所持金が足りません（必要 ${cost}G／所持金 ${S.gold}G）`, 'bad'); return; }
   S.gold -= cost; S.ordered = { gel: sh.gel, elixir: sh.elixir, cost }; S.sheet = null; S.hand = null;
+  SFX.paper(); SFX.coin(); goldPop(-cost);
   toast(`注文書を封筒に入れて道具屋へ送りました（支払い ${cost}G）`, 'good');
 }
 function nextDay() {
@@ -396,7 +404,23 @@ function sprite(gid, status, scale) {
 function itemImg(kind, cls) { const i = el('img', 'px ' + (cls || '')); i.src = `img/item_${kind}.png`; i.alt = ITEM_NAME[kind] || ''; return i; }
 
 /* ---------- 画面 ---------- */
+function goldPop(n) {
+  const g = $('#tbGold');
+  const e = el('div', 'goldpop ' + (n < 0 ? 'neg' : ''), (n > 0 ? '+' : '') + n + 'G');
+  e.style.left = (g.offsetLeft - 6) + 'px';
+  $('#stage').appendChild(e);
+  setTimeout(() => e.remove(), 1500);
+  g.classList.remove('flash'); void g.offsetWidth; g.classList.add('flash');
+}
+function showScene(title, sub) {
+  const c = $('#scene');
+  c.innerHTML = '';
+  c.appendChild(el('div', 'sc-t', title));
+  if (sub) c.appendChild(el('div', 'sc-s', sub));
+  c.classList.remove('show'); void c.offsetWidth; c.classList.add('show');
+}
 function toast(msg, kind) {
+  if (kind === 'bad') SFX.bad();
   const box = $('#logList');
   const t = el('div', 'logline new ' + (kind || ''));
   t.appendChild(el('span', 'tm', S.phase !== 'title' ? hhmm(S.clock) : ''));
@@ -481,13 +505,14 @@ function questSheet(q, p) {
     const r = el('div', 'qrow'); r.appendChild(el('span', 'k', k)); r.appendChild(el('span', 'v', v)); sh.appendChild(r);
   }
   sh.appendChild(el('div', 'qflavor', `「${q.title}」`));
+  if (p.decision) sh.appendChild(el('div', 'decision-stamp ' + p.decision, p.decision === 'approve' ? '認可' : '却下'));
   return sh;
 }
 function deskKeyOf() {
   const s = selSlot(); const p = s.party;
   if (S.phase === 'morning' || S.phase === 'night') return S.phase + JSON.stringify([S.packages, S.sheet, S.ordered, S.hand, S.gold]);
   let k = S.selected + '|' + s.state + '|' + (p ? p.id : '') + '|' + S.hand + '|' + S.phase;
-  if (p) k += '|' + p.checks.comp + p.checks.short + '|' + p.counter.map(c => c.kind[0] + (c.tagged ? 1 : 0)).join('') + '|' + p.stamped;
+  if (p) k += '|' + p.decision + '|' + p.checks.comp + p.checks.short + '|' + p.counter.map(c => c.kind[0] + (c.tagged ? 1 : 0)).join('') + '|' + p.stamped;
   return k;
 }
 function renderDesk() {
@@ -514,7 +539,7 @@ function renderDesk() {
   if (s.state === 'reception') return deskReception(d, s, p);
   if (s.state === 'departing' || s.state === 'quest') return deskQuest(d, s, p);
   if (s.state === 'returned' || (s.state === 'leaving' && p.stamped)) return deskReturned(d, s, p, head);
-  d.appendChild(el('div', 'desk-empty', '対応済みです。'));
+  deskDecided(d, s, p);
 }
 function deskReception(d, s, p) {
   d.appendChild(questSheet(p.quest, p));
@@ -527,7 +552,7 @@ function deskReception(d, s, p) {
     const c = el('button', 'chk' + (p.checks[r.id] ? ' on' : ''));
     c.title = r.desc;
     c.appendChild(el('span', 'box')); c.appendChild(el('span', '', r.label));
-    c.addEventListener('click', () => { p.checks[r.id] = !p.checks[r.id]; });
+    c.addEventListener('click', () => { p.checks[r.id] = !p.checks[r.id]; SFX.click(); });
     dec.appendChild(c);
   }
   const ok = el('button', 'btn approve', '認可する');
@@ -537,6 +562,15 @@ function deskReception(d, s, p) {
   ng.addEventListener('click', () => reject(s));
   dec.appendChild(ok); dec.appendChild(ng);
   d.appendChild(dec);
+}
+function deskDecided(d, s, p) {
+  d.appendChild(questSheet(p.quest, p));
+  const mem = el('div', 'members');
+  for (const m of p.members) mem.appendChild(memberCard(m, 'ok', 'dim'));
+  d.appendChild(mem);
+  const why = !p.decision ? '閉店のため、受注できずに帰っていきます。'
+    : `却下の理由：${REASONS.filter(r => p.checks[r.id]).map(r => r.label).join('・')}`;
+  d.appendChild(el('div', 'trip', why));
 }
 function deskQuest(d, s, p) {
   d.appendChild(questSheet(p.quest, p));
@@ -751,6 +785,8 @@ function render() {
   const lob = $('#lobby');
   lob.classList.toggle('night', S.phase === 'night');
   lob.classList.toggle('dawn', S.phase === 'morning');
+  const dusk = busy() || S.phase === 'report' ? clamp((S.clock - 17 * 60) / (5 * 60), 0, 1) : 0;
+  lob.style.setProperty('--dusk', dusk.toFixed(3));
   const ci = $('#clerkImg'); const want = S.phase === 'night' ? 'img/clerk_rest.png' : 'img/clerk_work.png';
   if (!ci.src.endsWith(want)) ci.src = want;
 }
@@ -849,7 +885,7 @@ function setup() {
   for (let i = 0; i < CFG.SLOTS; i++) {
     const r = el('div', 'booth');
     r.style.left = (12 + i * 211) + 'px';
-    r.addEventListener('click', () => { S.selected = i; });
+    r.addEventListener('click', () => { if (S.selected !== i) SFX.click(); S.selected = i; });
     booths.appendChild(r);
     boothDom.push({ root: r, key: null, bar: null });
   }
@@ -885,6 +921,11 @@ function setup() {
     if (n >= 1 && n <= CFG.SLOTS && !S.paused) S.selected = n - 1;
   });
   const stage = $('#stage');
+  stage.addEventListener('pointerdown', () => SFX.init(), true);
+  const sb = $('#btnSound');
+  const setSoundLabel = () => { sb.innerHTML = SFX.isOn() ? '音 入' : '音 切'; };
+  setSoundLabel();
+  sb.addEventListener('click', () => { SFX.init(); SFX.setOn(!SFX.isOn()); setSoundLabel(); SFX.click(); });
   stage.addEventListener('mousemove', e => {
     const b = stage.getBoundingClientRect();
     const c = $('#hand');

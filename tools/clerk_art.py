@@ -221,13 +221,21 @@ def draw_cap(G):
 
 
 def draw_hands_work(G):
-    # 胸の前で手を重ねる
-    for y in (43, 44, 45):
-        G.span(y, 18, 29, "S")
+    # 胸の前で手を重ねる（袖口から手先へ）
+    for y in (42, 43, 44, 45, 46):
+        G.span(y, 15, 17, "W"); G.span(y, 30, 32, "W")
+    G.span(47, 15, 17, "V"); G.span(47, 30, 32, "V")
+    G.span(42, 19, 28, "S")
+    G.span(43, 18, 29, "S")
+    G.span(44, 18, 29, "S")
+    G.span(45, 18, 29, "S")
     G.span(46, 19, 28, "s")
-    for x in (21, 24, 27):
-        G.put(x, 44, "s")
-    G.put(18, 43, "s"); G.put(29, 43, "s")
+    G.put(18, 42, "s"); G.put(29, 42, "s")
+    # 指の線（上に重ねた右手）
+    for x in (20, 22, 24):
+        G.put(x, 45, "s")
+    G.span(43, 25, 28, "s")
+    G.put(18, 46, "."); G.put(29, 46, ".")
 
 
 def draw_mug(G):
