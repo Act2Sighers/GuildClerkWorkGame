@@ -11,6 +11,8 @@ const CFG = {
   START_GOLD: 80,
   START_STOCK: { gel: 8, elixir: 4 },
   SHELF_MAX: 12,
+  PRICE: { gel: 8, elixir: 24 },  // 道具屋の単価
+  ORDER_STAMPS: [2, 5, 10],
   // 報酬
   HQ_REWARD: { C: 6, B: 10, A: 15, S: 22 },     // ギルド運営本部（成功時）
   OWNER_REWARD: { C: 14, B: 24, A: 38, S: 56 }, // 依頼主（成功時）

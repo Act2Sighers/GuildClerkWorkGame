@@ -28,7 +28,7 @@ const S = {
   day: 1, gold: CFG.START_GOLD, stock: { ...CFG.START_STOCK },
   clock: CFG.OPEN, phase: 'title', paused: false,
   slots: Array.from({ length: CFG.SLOTS }, (_, i) => ({ i, state: 'empty', party: null, until: 0, enter: false })),
-  selected: 0, holding: false, nextArrival: CFG.OPEN + 8, seq: 1, rt: 0, stats: newStats(),
+  selected: 0, hand: null, order: null, ordered: null, packages: [], sheet: null, nextArrival: CFG.OPEN + 8, seq: 1, rt: 0, stats: newStats(),
 };
 function newStats() {
   return {
@@ -196,18 +196,18 @@ function clickItem(idx) {
   const slot = selSlot(); const p = slot.party;
   if (slot.state !== 'returned' || !p || p.stamped) return;
   const it = p.counter[idx]; if (!it) return;
-  if (S.holding) { it.tagged = true; return; }
+  if (S.hand === 'tag') { it.tagged = true; return; }
   p.counter.splice(idx, 1); S.stock[it.kind]++;
 }
 function toggleTag() {
   const slot = selSlot();
-  if (!S.holding && (slot.state !== 'returned' || !slot.party || slot.party.stamped)) return;
-  S.holding = !S.holding;
+  if (S.hand !== 'tag' && (slot.state !== 'returned' || !slot.party || slot.party.stamped)) return;
+  S.hand = S.hand === 'tag' ? null : 'tag';
 }
 function stamp() {
   const slot = selSlot(); const p = slot.party;
   if (slot.state !== 'returned' || !p || p.stamped) return;
-  p.stamped = true; S.holding = false;
+  p.stamped = true; S.hand = null;
   const need = { gel: p.members.filter(m => m.status === 'hurt').length, elixir: p.members.filter(m => m.status === 'ghost').length };
   const got = { gel: p.counter.filter(c => c.kind === 'gel').length, elixir: p.counter.filter(c => c.kind === 'elixir').length };
   const miss = [];
@@ -241,7 +241,7 @@ function closeBusiness() {
   toast('営業終了。帰還したパーティの対応を終えるまで受付は続きます');
 }
 function endDay() {
-  S.phase = 'report'; S.holding = false;
+  S.phase = 'report'; S.hand = null;
   showReport();
 }
 function startDay() {
@@ -254,6 +254,94 @@ function startDay() {
   S.stats.carriedIn = carried;
   S.stats.returned -= carried; // 前日分の帰還は「持ち越し」として別に数える
   toast(`${S.day}日目の営業を開始します`);
+}
+
+/* ---------- 早朝・深夜 ---------- */
+const PACK_OF = { 2: 'pouch', 5: 'crate_s', 10: 'crate_l' };
+const PACK_NAME = { pouch: '皮製の小包', crate_s: '小さな木箱', crate_l: '大きな木箱' };
+const KINDS = ['gel', 'elixir'];
+
+function toMorning() {
+  S.phase = 'morning'; S.clock = CFG.OPEN - 10; S.hand = null; S.sheet = null; S.ordered = null;
+  S.packages = [];
+  if (S.order) for (const kind of KINDS) {
+    const n = S.order[kind];
+    if (n) S.packages.push({ kind, n, left: n, type: PACK_OF[n], open: false });
+  }
+  S.order = null;
+  toast(S.packages.length ? `${S.day}日目の朝。昨夜注文した支給品が届いています` : `${S.day}日目の朝。届いた荷物はありません`);
+}
+function clickPackage(pk) {
+  if (!pk.open) { pk.open = true; return; }
+  if (pk.left > 0) { toast('中身を棚に並べ終えてから片付けます', 'bad'); return; }
+  S.packages = S.packages.filter(x => x !== pk);
+}
+function unpackOne(pk) {
+  if (!pk.open || pk.left <= 0) return;
+  if (S.stock[pk.kind] >= CFG.SHELF_MAX) { toast(`棚の${ITEM_NAME[pk.kind]}がいっぱいです`, 'bad'); return; }
+  pk.left--; S.stock[pk.kind]++;
+}
+function openBusiness() {
+  if (S.phase !== 'morning') return;
+  if (S.packages.length) { toast('届いた荷物を片付けてから営業を始めます', 'bad'); return; }
+  startDay();
+}
+function toNight() {
+  S.phase = 'night'; S.clock = CFG.CLOSE + 10; S.hand = null; S.sheet = null; S.ordered = null;
+  $('#reportOv').hidden = true;
+}
+// 注文書
+function newSheet() { if (S.ordered || S.sheet) return; S.sheet = { gel: 0, elixir: 0 }; }
+function cancelSheet() { S.sheet = null; if (typeof S.hand === 'number') S.hand = null; }
+function discardSheet() { S.sheet = { gel: 0, elixir: 0 }; toast('注文書を捨てて、新しい用紙を出しました'); }
+function grabStamp(n) { if (S.ordered) return; S.hand = S.hand === n ? null : n; }
+function stampSlot(kind) {
+  if (!S.sheet) return;
+  if (typeof S.hand !== 'number') { toast('先に「2」「5」「10」のハンコを手に取ります'); return; }
+  if (S.sheet[kind]) { toast('この枠にはもう押してあります。書き直すなら注文書を捨てます', 'bad'); return; }
+  S.sheet[kind] = S.hand;
+}
+const sheetCost = sh => KINDS.reduce((a, k) => a + sh[k] * CFG.PRICE[k], 0);
+function sendOrder() {
+  if (S.ordered) return;
+  const sh = S.sheet;
+  if (!sh) { toast('封筒に入れる注文書がありません'); return; }
+  if (!sh.gel && !sh.elixir) { toast('注文書に何も書かれていません', 'bad'); return; }
+  for (const k of KINDS) {
+    if (S.stock[k] + sh[k] > CFG.SHELF_MAX) { toast(`${ITEM_NAME[k]}が棚に入りきりません（棚は${CFG.SHELF_MAX}個まで）`, 'bad'); return; }
+  }
+  const cost = sheetCost(sh);
+  if (cost > S.gold) { toast(`所持金が足りません（必要 ${cost}G／所持金 ${S.gold}G）`, 'bad'); return; }
+  S.gold -= cost; S.ordered = { gel: sh.gel, elixir: sh.elixir, cost }; S.sheet = null; S.hand = null;
+  toast(`注文書を封筒に入れて道具屋へ送りました（支払い ${cost}G）`, 'good');
+}
+function nextDay() {
+  if (S.phase !== 'night') return;
+  S.order = S.ordered; S.day++;
+  save();
+  toMorning();
+}
+
+/* ---------- セーブ（日の区切りでだけ保存） ---------- */
+const SAVE_KEY = 'guild-clerk-work-v1';
+function save() {
+  const slots = S.slots.map(s => (s.state === 'quest' || s.state === 'departing') ? { party: { ...s.party, bubble: null } } : null);
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 1, day: S.day, gold: S.gold, stock: S.stock, order: S.order, seq: S.seq, slots }));
+  } catch (e) { /* 保存できない環境では何もしない */ }
+}
+function loadSave() {
+  try { const d = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); return d && d.v === 1 ? d : null; } catch (e) { return null; }
+}
+function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* noop */ } }
+function reset() {
+  Object.assign(S, { day: 1, gold: CFG.START_GOLD, stock: { ...CFG.START_STOCK }, order: null, ordered: null, packages: [], sheet: null, hand: null, seq: 1, selected: 0, stats: newStats() });
+  for (const s of S.slots) { s.state = 'empty'; s.party = null; s.enter = false; }
+}
+function applySave(d) {
+  reset();
+  Object.assign(S, { day: d.day, gold: d.gold, stock: { ...d.stock }, order: d.order, seq: d.seq });
+  d.slots.forEach((x, i) => { if (x && S.slots[i]) { S.slots[i].state = 'quest'; S.slots[i].party = x.party; } });
 }
 
 function update(dt) {
@@ -311,7 +399,7 @@ function itemImg(kind, cls) { const i = el('img', 'px ' + (cls || '')); i.src = 
 function toast(msg, kind) {
   const box = $('#logList');
   const t = el('div', 'logline new ' + (kind || ''));
-  t.appendChild(el('span', 'tm', busy() || S.phase === 'report' ? hhmm(S.clock) : ''));
+  t.appendChild(el('span', 'tm', S.phase !== 'title' ? hhmm(S.clock) : ''));
   t.appendChild(document.createTextNode(msg));
   box.prepend(t);
   while (box.children.length > 8) box.lastChild.remove();
@@ -323,6 +411,7 @@ function boothKey(s) {
   const p = s.party;
   let k = s.state + '|' + (p ? p.id : '') + '|' + bubbleText(p);
   if (p && s.state === 'returned') k += '|' + p.members.map(m => m.status).join(',');
+  if (s.state === 'quest') k += '|' + S.phase;
   return k;
 }
 function buildBooth(s) {
@@ -340,7 +429,7 @@ function buildBooth(s) {
     const n = el('div', 'notice');
     n.appendChild(el('div', 't', `${p.name}`));
     n.appendChild(el('div', '', `${q.type}・${q.diff}級・${q.hours}時間`));
-    n.appendChild(el('div', '', '帰還予定 ' + (p.plannedReturn > CFG.CLOSE ? '翌日' : hhmm(p.plannedReturn))));
+    n.appendChild(el('div', '', '帰還予定 ' + (p.plannedReturn <= CFG.CLOSE ? hhmm(p.plannedReturn) : S.phase === 'morning' ? '本日の開店時' : '翌日の開店時')));
     const bar = el('div', 'bar'); const fill = el('i'); bar.appendChild(fill); n.appendChild(bar);
     b.bar = { fill, p };
     b.root.appendChild(n);
@@ -396,7 +485,8 @@ function questSheet(q, p) {
 }
 function deskKeyOf() {
   const s = selSlot(); const p = s.party;
-  let k = S.selected + '|' + s.state + '|' + (p ? p.id : '') + '|' + S.holding + '|' + S.phase;
+  if (S.phase === 'morning' || S.phase === 'night') return S.phase + JSON.stringify([S.packages, S.sheet, S.ordered, S.hand, S.gold]);
+  let k = S.selected + '|' + s.state + '|' + (p ? p.id : '') + '|' + S.hand + '|' + S.phase;
   if (p) k += '|' + p.checks.comp + p.checks.short + '|' + p.counter.map(c => c.kind[0] + (c.tagged ? 1 : 0)).join('') + '|' + p.stamped;
   return k;
 }
@@ -408,6 +498,8 @@ function renderDesk() {
   }
   deskKey = k; deskBar = null;
   const d = $('#desk'); d.innerHTML = '';
+  if (S.phase === 'morning') return deskMorning(d);
+  if (S.phase === 'night') return deskNight(d);
   const s = selSlot(); const p = s.party;
   const head = el('div', 'desk-head');
   head.appendChild(el('span', '', `窓口${s.i + 1}`));
@@ -466,8 +558,8 @@ function deskReturned(d, s, p, head) {
   d.appendChild(mem);
   d.appendChild(el('div', 'hint-line', p.stamped ? '手当を渡しました。' : '棚から品を取ってカウンターへ。カウンターの品をクリックすると棚に戻します。'));
   const tray = el('div', 'tray');
-  const ts = el('div', 'tagspot' + (S.holding ? ' holding' : ''));
-  if (!S.holding) { ts.appendChild(itemImg('tags')); ts.appendChild(el('div', '', 'タグの束')); }
+  const ts = el('div', 'tagspot' + (S.hand === 'tag' ? ' holding' : ''));
+  if (S.hand !== 'tag') { ts.appendChild(itemImg('tags')); ts.appendChild(el('div', '', 'タグの束')); }
   else ts.appendChild(el('div', '', 'クリックで\nタグの束を\n置く'));
   ts.style.whiteSpace = 'pre-line';
   ts.addEventListener('click', toggleTag);
@@ -493,11 +585,129 @@ function deskReturned(d, s, p, head) {
   d.appendChild(tray);
 }
 
+function deskMorning(d) {
+  const head = el('div', 'desk-head');
+  head.appendChild(el('span', '', '早朝'));
+  head.appendChild(el('span', 'sub', '支給品の受け取り'));
+  d.appendChild(head);
+  const area = el('div', 'packs');
+  if (!S.packages.length) area.appendChild(el('div', 'packs-empty', '棚の準備はできています。'));
+  for (const pk of S.packages) {
+    const box = el('div', 'pack');
+    const b = el('button', 'pack-btn ' + pk.type);
+    const im = el('img', 'px'); im.src = `img/item_${pk.type}${pk.open ? '_open' : ''}.png`; im.alt = PACK_NAME[pk.type];
+    b.appendChild(im);
+    b.addEventListener('click', () => clickPackage(pk));
+    box.appendChild(b);
+    box.appendChild(el('div', 'pack-name', `${PACK_NAME[pk.type]}（${ITEM_NAME[pk.kind]} ${pk.n}個）`));
+    box.appendChild(el('div', 'pack-cap', !pk.open ? 'クリックで開ける' : pk.left ? '中身をクリックして棚へ' : '空になった。包みをクリックで片付ける'));
+    if (pk.open) {
+      const row = el('div', 'pack-items');
+      for (let i = 0; i < pk.left; i++) {
+        const it = el('button', 'item');
+        it.appendChild(itemImg(pk.kind));
+        it.addEventListener('click', () => unpackOne(pk));
+        row.appendChild(it);
+      }
+      box.appendChild(row);
+    }
+    area.appendChild(box);
+  }
+  d.appendChild(area);
+  const foot = el('div', 'phase-foot');
+  const carried = S.slots.filter(s => s.state === 'quest').length;
+  foot.appendChild(el('div', 'phase-note', (carried ? `前日からクエスト中のパーティ ${carried}組は、営業開始と同時に帰還します。` : '') + (S.packages.length ? '荷物を片付けると営業を始められます。' : '')));
+  const go = el('button', 'btn go', '営業開始');
+  go.disabled = S.packages.length > 0;
+  go.addEventListener('click', openBusiness);
+  foot.appendChild(go);
+  d.appendChild(foot);
+}
+
+function deskNight(d) {
+  const head = el('div', 'desk-head');
+  head.appendChild(el('span', '', '深夜'));
+  head.appendChild(el('span', 'sub', '明日の支給品の注文'));
+  d.appendChild(head);
+  // ハンコ台
+  const stand = el('div', 'stamp-stand');
+  stand.appendChild(el('div', 'stand-cap', 'ハンコ'));
+  for (const n of CFG.ORDER_STAMPS) {
+    const b = el('button', 'ostamp' + (S.hand === n ? ' held' : ''));
+    if (S.hand !== n) { b.appendChild(itemImg('stamp')); b.appendChild(el('span', 'num', String(n))); }
+    else b.appendChild(el('span', 'put', `「${n}」を\n戻す`));
+    b.addEventListener('click', () => grabStamp(n));
+    stand.appendChild(b);
+  }
+  d.appendChild(stand);
+  // 注文書
+  if (S.ordered) {
+    const sh = el('div', 'sheet order-sheet');
+    sh.appendChild(el('h3', '', '注文済み'));
+    for (const k of KINDS) sh.appendChild(el('div', 'orow', `${ITEM_NAME[k]}　${S.ordered[k] ? S.ordered[k] + '個' : '—'}`));
+    sh.appendChild(el('div', 'orow total', `支払い ${S.ordered.cost}G`));
+    sh.appendChild(el('div', 'onote', '明日の早朝に届きます。'));
+    d.appendChild(sh);
+  } else if (S.sheet) {
+    const sh = el('div', 'sheet order-sheet');
+    sh.appendChild(el('h3', '', '支給品 注文書'));
+    for (const k of KINDS) {
+      const r = el('div', 'orow');
+      r.appendChild(el('span', 'oname', ITEM_NAME[k]));
+      r.appendChild(el('span', 'oprice', `単価 ${CFG.PRICE[k]}G`));
+      const slot = el('button', 'oslot' + (S.sheet[k] ? ' done' : ''));
+      slot.appendChild(el('span', '', S.sheet[k] ? String(S.sheet[k]) : ''));
+      slot.title = 'ハンコを持ってクリック（空欄は0個）';
+      slot.addEventListener('click', () => stampSlot(k));
+      r.appendChild(slot);
+      sh.appendChild(r);
+    }
+    sh.appendChild(el('div', 'orow total', `合計 ${sheetCost(S.sheet)}G`));
+    const btns = el('div', 'obtns');
+    const tr = el('button', 'btn small', '捨てて書き直す'); tr.addEventListener('click', discardSheet);
+    const cn = el('button', 'btn small', 'やめる'); cn.addEventListener('click', cancelSheet);
+    btns.appendChild(tr); btns.appendChild(cn);
+    sh.appendChild(btns);
+    d.appendChild(sh);
+  } else {
+    const pad = el('button', 'sheet order-pad');
+    pad.appendChild(el('div', 'pad-t', '注文書の束'));
+    pad.appendChild(el('div', 'pad-s', 'クリックで書き始める'));
+    pad.addEventListener('click', newSheet);
+    d.appendChild(pad);
+  }
+  // 封筒
+  const env = el('button', 'envelope' + (S.ordered ? ' sent' : ''));
+  env.appendChild(itemImg('envelope'));
+  env.appendChild(el('div', '', S.ordered ? '送付済み' : '封筒に入れて送る'));
+  env.addEventListener('click', sendOrder);
+  d.appendChild(env);
+  // メモ
+  const memo = el('div', 'night-memo');
+  memo.appendChild(el('div', '', `本日使った品：回復ジェル ${S.stats.gelUsed}個・霊薬 ${S.stats.elixirUsed}個`));
+  memo.appendChild(el('div', '', `価格：回復ジェル ${CFG.PRICE.gel}G・霊薬 ${CFG.PRICE.elixir}G`));
+  memo.appendChild(el('div', '', `棚は各${CFG.SHELF_MAX}個まで`));
+  d.appendChild(memo);
+  const go = el('button', 'btn go', '次の日へ');
+  go.addEventListener('click', nextDay);
+  d.appendChild(go);
+}
+
+function renderHand() {
+  const h = $('#hand');
+  if (S.hand == null) { h.hidden = true; return; }
+  h.hidden = false;
+  const src = S.hand === 'tag' ? 'img/item_tag.png' : 'img/item_stamp.png';
+  const im = $('#handImg'); if (!im.src.endsWith(src)) im.src = src;
+  const num = S.hand === 'tag' ? '' : String(S.hand);
+  const nn = $('#handNum'); if (nn.textContent !== num) nn.textContent = num;
+}
+
 let shelfKey = '';
 function renderShelf() {
   const s = selSlot();
   const can = s.state === 'returned' && s.party && !s.party.stamped;
-  const k = S.stock.gel + '|' + S.stock.elixir + '|' + can;
+  const k = S.stock.gel + '|' + S.stock.elixir + '|' + can + '|' + S.phase;
   if (k === shelfKey) return;
   shelfKey = k;
   const sh = $('#shelf'); sh.innerHTML = '';
@@ -518,14 +728,17 @@ function renderShelf() {
     c.addEventListener('click', () => takeItem(kind));
     sh.appendChild(c);
   }
-  sh.appendChild(el('div', 'shelf-note', can ? 'クリックで1つ取り出します。' : '帰還したパーティの窓口を選ぶと、ここから品を取り出せます。'));
+  const note = S.phase === 'morning' ? '開けた包みの中身をクリックすると、ここに並びます。'
+    : S.phase === 'night' ? '明日の分が足りなければ、注文書で道具屋に注文します。'
+    : can ? 'クリックで1つ取り出します。' : '帰還したパーティの窓口を選ぶと、ここから品を取り出せます。';
+  sh.appendChild(el('div', 'shelf-note', note));
 }
 
 function renderTop() {
   $('#tbDay').textContent = `${S.day}日目`;
   $('#tbClock').textContent = hhmm(S.clock);
   const st = $('#tbStatus');
-  const txt = S.phase === 'business' ? '営業中' : S.phase === 'afterhours' ? '営業終了・対応中' : S.phase === 'report' ? '営業終了' : '開店前';
+  const txt = { business: '営業中', afterhours: '営業終了・対応中', report: '営業終了', morning: '早朝・開店前', night: '深夜・閉店後' }[S.phase] || '開店前';
   if (st.textContent !== txt) st.textContent = txt;
   st.classList.toggle('closed', S.phase !== 'business');
   $('#tbGold').textContent = S.gold;
@@ -534,7 +747,12 @@ function renderTop() {
 
 function render() {
   renderTop(); renderBooths(); renderDesk(); renderShelf();
-  $('#tagCursor').hidden = !S.holding;
+  renderHand();
+  const lob = $('#lobby');
+  lob.classList.toggle('night', S.phase === 'night');
+  lob.classList.toggle('dawn', S.phase === 'morning');
+  const ci = $('#clerkImg'); const want = S.phase === 'night' ? 'img/clerk_rest.png' : 'img/clerk_work.png';
+  if (!ci.src.endsWith(want)) ci.src = want;
 }
 
 /* ---------- 重ね表示 ---------- */
@@ -603,6 +821,11 @@ function buildRules() {
     <li>書類にハンコを押すと、パーティがカウンターの品を受け取る</li>
   </ul>
   <p>渡す数の誤り（在庫切れも含む）とタグの貼り忘れは、それぞれ1件のミスになり、報酬が減ります。</p>
+  <h3>支給品の注文（深夜）</h3>
+  <p>注文書の各品の枠に「2」「5」「10」のどれかのハンコを1回だけ押します（空欄は0個）。押し間違えたら注文書を捨てて書き直します。
+  封筒に入れると道具屋へ送られ、その場で代金を所持金から払います。所持金が足りないときや、棚（各${CFG.SHELF_MAX}個まで）に入りきらないときは送れません。
+  届いた品は翌日の早朝に、包みを開けて1つずつ棚に並べます。</p>
+  <p>単価：回復ジェル ${CFG.PRICE.gel}G・霊薬 ${CFG.PRICE.elixir}G</p>
   <h3>報酬</h3>
   <p>クエスト完了時は運営本部と依頼主から。正しく却下したときは運営本部から少額。全滅したときは報酬なし。</p>`;
 }
@@ -631,12 +854,24 @@ function setup() {
     boothDom.push({ root: r, key: null, bar: null });
   }
   buildRules();
+  const saved = loadSave();
+  if (saved) {
+    $('#btnContinue').hidden = false;
+    $('#btnContinue').textContent = `続きから（${saved.day}日目の早朝）`;
+    $('#btnStart').textContent = 'はじめから';
+  }
+  let armed = false;
   $('#btnStart').addEventListener('click', () => {
-    $('#titleOv').hidden = true; S.day = 1; startDay();
+    if (loadSave() && !armed) { armed = true; $('#btnStart').textContent = '記録を消してはじめから（もう一度押す）'; return; }
+    clearSave(); reset();
+    $('#titleOv').hidden = true; toMorning();
   });
-  $('#btnNextDay').addEventListener('click', () => {
-    $('#reportOv').hidden = true; S.day++; startDay();
+  $('#btnContinue').addEventListener('click', () => {
+    const d = loadSave(); if (!d) return;
+    applySave(d);
+    $('#titleOv').hidden = true; toMorning();
   });
+  $('#btnNextDay').addEventListener('click', toNight);
   $('#btnRules').addEventListener('click', () => { $('#rulesOv').hidden = false; });
   $('#btnRulesClose').addEventListener('click', () => { $('#rulesOv').hidden = true; });
   $('#btnPause').addEventListener('click', () => setPaused(!S.paused));
@@ -651,9 +886,8 @@ function setup() {
   });
   const stage = $('#stage');
   stage.addEventListener('mousemove', e => {
-    if (!S.holding) return;
     const b = stage.getBoundingClientRect();
-    const c = $('#tagCursor');
+    const c = $('#hand');
     c.style.left = (e.clientX - b.left) / scale + 'px';
     c.style.top = (e.clientY - b.top) / scale + 'px';
   });
@@ -674,5 +908,5 @@ Promise.all([loadImg('adv', 'img/adventurers.png'), loadImg('bandage', 'img/band
 });
 
 // 動作確認用（ブラウザのコンソールから参照できるようにしておく）
-window.__guild = { S, evaluate, update };
+window.__guild = { S, evaluate, update, save, loadSave };
 })();

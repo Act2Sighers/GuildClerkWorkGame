@@ -47,7 +47,9 @@
         <li>受注の申請には「認可」か、理由を選んで「却下」で答える</li>
         <li>帰還したパーティには手当の品を出し、タグを貼って書類にハンコ</li>
         <li>時間制限はないが、対応が遅いと1日の来客が減る</li>
+        <li>深夜に支給品を注文し、早朝に届いた荷物を棚に並べる</li>
       </ul>
+      <button class="btn primary" id="btnContinue" hidden>続きから</button>
       <button class="btn primary" id="btnStart">営業を始める</button>
     </div>
   </div>
@@ -56,7 +58,7 @@
     <div class="panel report-panel">
       <h2 id="repTitle">営業成績</h2>
       <div id="repBody"></div>
-      <button class="btn primary" id="btnNextDay">次の日へ</button>
+      <button class="btn primary" id="btnNextDay">業務を終える</button>
     </div>
   </div>
 
@@ -76,7 +78,7 @@
     </div>
   </div>
 
-  <img id="tagCursor" class="px" src="img/item_tag.png" alt="" hidden>
+  <div id="hand" hidden><img class="px" id="handImg" src="img/item_tag.png" alt=""><span id="handNum"></span></div>
 </div>
 
 <script src="js/adv_meta.js"></script>

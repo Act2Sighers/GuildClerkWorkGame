@@ -19,6 +19,7 @@ PAL = {
     "R": hx("#d6404f"), "r": hx("#962a38"),
     "N": hx("#3a2e30"), "M": hx("#c9d2de"),
     "S": hx("#c8a070"),
+    "L": hx("#a8703f"), "l": hx("#6a4024"), "D": hx("#2a1a12"), "B": hx("#8a5a30"),
 }
 
 ICONS = {
@@ -115,11 +116,130 @@ ICONS = {
 }
 
 
+CRATE_S_BODY = [
+    "..kKKKKKKKKKKk..",
+    "..kkkkkkkkkkkk..",
+    "..kKKKKKKKKKKk..",
+    "..kKkKKKKKKkKk..",
+    "..kKKKKKKKKKKk..",
+    "..kkkkkkkkkkkk..",
+    "..kKKKKKKKKKKk..",
+    "..kKkKKKKKKkKk..",
+    "..kkkkkkkkkkkk..",
+    "................",
+]
+ICONS.update({
+    "pouch": [
+        "................",
+        "......lLLl......",
+        ".......GG.......",
+        "......LLLL......",
+        ".....LLLLLL.....",
+        "....LLLLLLLL....",
+        "...LLLlLLLLLL...",
+        "...LLLLLLLLLL...",
+        "..LLLLLLLLLLLL..",
+        "..LLLLLLLLLLlL..",
+        "..LlLLLLLLLLlL..",
+        "..lLLLLLLLLLll..",
+        "...llLLLLLLll...",
+        "....llllllll....",
+        "................",
+        "................",
+    ],
+    "pouch_open": [
+        "................",
+        "................",
+        "................",
+        "...LLLLLLLLLL...",
+        "..LDDDDDDDDDDL..",
+        "..LDDYDDDYDDDL..",
+        "...LLLLLLLLLL...",
+        "..LLLLLLLLLLLL..",
+        "..LLLLLLLLLLLL..",
+        "..LLLLLLLLLLlL..",
+        "..LlLLLLLLLLlL..",
+        "..lLLLLLLLLLll..",
+        "...llLLLLLLll...",
+        "....llllllll....",
+        "................",
+        "................",
+    ],
+    "crate_s": [
+        "................",
+        "................",
+        "..kkkkkkkkkkkk..",
+        "..kKKKKKKKKKKk..",
+        "..kKkKKKKKKkKk..",
+        "..kkkkkkkkkkkk..",
+    ] + CRATE_S_BODY,
+    "crate_s_open": [
+        "................",
+        "................",
+        "..kkkkkkkkkkkk..",
+        "..kDYDDYDDDYDk..",
+        "..kYDDDYDYDDYk..",
+        "..kkkkkkkkkkkk..",
+    ] + CRATE_S_BODY,
+    "envelope": [
+        "................",
+        "................",
+        "................",
+        ".yyyyyyyyyyyyyy.",
+        ".yYyYYYYYYYYyYy.",
+        ".yYYyYYYYYYyYYy.",
+        ".yYYYyYYYYyYYYy.",
+        ".yYYYYyRRyYYYYy.",
+        ".yYYYYYRRYYYYYy.",
+        ".yYYYYYYYYYYYYy.",
+        ".yYYYYYYYYYYYYy.",
+        ".yYYYYYYYYYYYYy.",
+        ".yyyyyyyyyyyyyy.",
+        "................",
+        "................",
+        "................",
+    ],
+})
+
+
+def crate_l(open_):
+    """大きな木箱 24x24"""
+    rows = []
+    rows.append("." * 24)
+    rows.append("." * 24)
+    rows.append("." + "k" * 22 + ".")
+    if open_:
+        rows.append(".k" + "DYDDYDDDYDYDDYDDYDDY" + "k.")
+        rows.append(".k" + "YDDDYDYDDDDYDYDDDYDD" + "k.")
+        rows.append(".k" + "DDYDDDDYDYDDDDYDYDDY" + "k.")
+    else:
+        rows.append(".k" + "K" * 20 + "k.")
+        rows.append(".k" + "KkKKKKKKKKKKKKKKKKkK" + "k.")
+        rows.append(".k" + "K" * 20 + "k.")
+    rows.append("." + "k" * 22 + ".")
+    for i in range(14):
+        r = ["K"] * 20
+        if i in (4, 9):
+            r = ["k"] * 20
+        else:
+            d = int(i * 19 / 13)
+            r[d] = "k"
+            if d + 1 < 20: r[d + 1] = "B"
+        if i in (1, 12):
+            r[1] = "M"; r[18] = "M"
+        rows.append(".k" + "".join(r) + "k.")
+    rows.append("." + "k" * 22 + ".")
+    rows.append("." * 24)
+    rows.append("." * 24)
+    return rows
+
+
 def icon(rows):
-    im = Image.new("RGBA", (16, 16), (0, 0, 0, 0))
+    size = len(rows[0])
+    im = Image.new("RGBA", (size, len(rows)), (0, 0, 0, 0))
     px = im.load()
     for y, r in enumerate(rows):
-        assert len(r) == 16, r
+        assert len(r) == size, r
         for x, ch in enumerate(r):
             if ch != ".":
                 px[x, y] = PAL[ch] + (255,)
@@ -164,11 +284,18 @@ def lobby_bg():
 def main():
     for k, rows in ICONS.items():
         icon(rows).save(os.path.join(IMG, f"item_{k}.png"))
+    icon(crate_l(False)).save(os.path.join(IMG, "item_crate_l.png"))
+    icon(crate_l(True)).save(os.path.join(IMG, "item_crate_l_open.png"))
     lobby_bg().save(os.path.join(IMG, "bg_lobby.png"))
     if "--preview" in sys.argv:
         bg = Image.new("RGBA", (16 * 6 * len(ICONS), 16 * 6), (120, 104, 92, 255))
         for i, k in enumerate(ICONS):
             bg.alpha_composite(icon(ICONS[k]).resize((96, 96), Image.NEAREST), (i * 96, 0))
+        bg2 = Image.new("RGBA", (bg.width, 96 + 24 * 4), (120, 104, 92, 255))
+        bg2.alpha_composite(bg, (0, 0))
+        bg2.alpha_composite(icon(crate_l(False)).resize((96, 96), Image.NEAREST), (0, 96))
+        bg2.alpha_composite(icon(crate_l(True)).resize((96, 96), Image.NEAREST), (110, 96))
+        bg = bg2
         bg.save("/tmp/items_preview.png")
     print("ok")
 
