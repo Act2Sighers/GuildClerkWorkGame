@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GuildClerkWorkGame</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="stage">
+  <header id="topbar">
+    <div class="brand">冒険者ギルド　受付</div>
+    <div class="tb-item" id="tbDay">1日目</div>
+    <div class="tb-clock" id="tbClock">06:00</div>
+    <div class="tb-status" id="tbStatus">営業中</div>
+    <div class="tb-gold">所持金 <b id="tbGold">0</b> G</div>
+    <div class="tb-stock" id="tbStock"></div>
+    <div class="spacer"></div>
+    <button class="tb-btn" id="btnRules">規定集</button>
+    <button class="tb-btn" id="btnPause">一時停止 <small>P</small></button>
+  </header>
+
+  <section id="lobby">
+    <div id="booths"></div>
+  </section>
+  <div id="counterTop"></div>
+
+  <section id="work">
+    <div id="clerkPanel">
+      <div id="log" aria-live="polite"><div class="log-h">連絡</div><div id="logList"></div></div>
+      <img id="clerkImg" class="px" src="img/clerk_work.png" alt="受付嬢">
+    </div>
+    <div id="desk"></div>
+    <div id="shelf"></div>
+  </section>
+
+  <div id="titleOv" class="overlay">
+    <div class="panel title-panel">
+      <div class="title-logo">GuildClerkWorkGame</div>
+      <div class="title-sub">冒険者ギルドの受付で働く</div>
+      <img class="px title-clerk" src="img/clerk_work.png" alt="">
+      <ul class="title-list">
+        <li>上の窓口をクリックして、対応するパーティを選ぶ</li>
+        <li>受注の申請には「認可」か、理由を選んで「却下」で答える</li>
+        <li>帰還したパーティには手当の品を出し、タグを貼って書類にハンコ</li>
+        <li>時間制限はないが、対応が遅いと1日の来客が減る</li>
+      </ul>
+      <button class="btn primary" id="btnStart">営業を始める</button>
+    </div>
+  </div>
+
+  <div id="reportOv" class="overlay" hidden>
+    <div class="panel report-panel">
+      <h2 id="repTitle">営業成績</h2>
+      <div id="repBody"></div>
+      <button class="btn primary" id="btnNextDay">次の日へ</button>
+    </div>
+  </div>
+
+  <div id="rulesOv" class="overlay" hidden>
+    <div class="panel rules-panel">
+      <h2>受付規定集</h2>
+      <div id="rulesBody"></div>
+      <button class="btn primary" id="btnRulesClose">閉じる</button>
+    </div>
+  </div>
+
+  <div id="pauseOv" class="overlay" hidden>
+    <div class="panel pause-panel">
+      <h2>一時停止中</h2>
+      <p>時間は止まっています。</p>
+      <button class="btn primary" id="btnResume">再開する <small>P</small></button>
+    </div>
+  </div>
+
+  <img id="tagCursor" class="px" src="img/item_tag.png" alt="" hidden>
+</div>
+
+<script src="js/adv_meta.js"></script>
+<script src="js/data.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
