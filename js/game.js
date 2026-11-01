@@ -124,7 +124,7 @@ function approve(slot) {
   const probs = problemsOf(p.ev);
   S.stats.approved++; p.decision = 'approve'; SFX.stamp();
   if (probs.length) {
-    p.mistakes++; p.wrongApproval = true; S.stats.approveWrong++;
+    p.mistakes++; p.wrongApproval = true; S.stats.approveWrong++; clerkFace('sad', 1.4);
     toast(`窓口${slot.i + 1}：誤った認可です（本来は却下：${reasonText(probs)}）`, 'bad');
   }
   // 結果はこの時点で決まる（サイコロではなく適否で決まり、負傷の有無と幽霊になる人だけ抽選）
@@ -153,19 +153,19 @@ function reject(slot) {
   const probs = problemsOf(p.ev);
   S.stats.rejected++; p.decision = 'reject'; SFX.stamp();
   if (!probs.length) {
-    S.stats.rejectWrong++;
+    S.stats.rejectWrong++; clerkFace('sad', 1.4);
     toast(`窓口${slot.i + 1}：誤った却下です。このパーティは受注して問題ありませんでした`, 'bad');
     setLeaving(slot, LINES.rejectWrong);
     return;
   }
   const same = chosen.length === probs.length && chosen.every(c => probs.includes(c));
   if (same) {
-    S.stats.rejectOk++;
+    S.stats.rejectOk++; if (!p.mistakes) clerkFace('happy', 1.6);
     earn(CFG.REJECT_FEE, 0);
     toast(`窓口${slot.i + 1}：正しい却下です　+${CFG.REJECT_FEE}G（運営本部）`, 'good');
     setLeaving(slot, LINES.rejectOk);
   } else {
-    p.mistakes++; S.stats.rejectReason++;
+    p.mistakes++; S.stats.rejectReason++; clerkFace('sad', 1.4);
     const g = Math.round(CFG.REJECT_FEE * Math.max(0, 1 - CFG.MISTAKE_CUT * p.mistakes));
     earn(g, 0);
     toast(`窓口${slot.i + 1}：却下理由が違います（正しくは：${reasonText(probs)}）　+${g}G`, 'bad');
@@ -217,6 +217,8 @@ function stamp() {
   if (need.gel !== got.gel || need.elixir !== got.elixir) miss.push('渡す数が不適切');
   if (p.counter.some(c => !c.tagged)) miss.push('タグの貼り忘れ');
   p.mistakes += miss.length;
+  // 1パーティへの対応がすべてミスなく終わったときだけ嬉しそうにする
+  if (miss.length) clerkFace('sad', 1.4); else if (!p.mistakes) clerkFace('happy', 1.6);
   S.stats.allowances++; S.stats.allowanceMiss += miss.length;
   S.stats.gelUsed += got.gel; S.stats.elixirUsed += got.elixir;
   const tag = `窓口${slot.i + 1}：`;
@@ -404,6 +406,25 @@ function sprite(gid, status, scale) {
 function itemImg(kind, cls) { const i = el('img', 'px ' + (cls || '')); i.src = `img/item_${kind}.png`; i.alt = ITEM_NAME[kind] || ''; return i; }
 
 /* ---------- 画面 ---------- */
+/* 受付嬢の表情 */
+const CLERK_DIR = 'img/newGraphic(clerk)/';
+const CLERK_FACES = ['eyeopen', 'blink_1', 'blink_2', 'happy', 'sad', 'rest'];
+const FACE = { kind: null, until: 0, blinkAt: 0, nextBlink: 0, shown: '' };
+function clerkFace(kind, sec) { FACE.kind = kind; FACE.until = performance.now() + sec * 1000; }
+function renderClerk() {
+  const now = performance.now();
+  let f;
+  if (S.phase === 'night') f = 'rest';
+  else if (FACE.kind && now < FACE.until) f = FACE.kind;
+  else {
+    // まばたき：開いた目 → blink_1 → blink_2 → 開いた目
+    if (!S.paused && now >= FACE.nextBlink) { FACE.blinkAt = now; FACE.nextBlink = now + rand(2600, 6200); }
+    const t = now - FACE.blinkAt;
+    f = t < 80 ? 'blink_1' : t < 160 ? 'blink_2' : 'eyeopen';
+  }
+  if (f !== FACE.shown) { FACE.shown = f; $('#clerkImg').src = CLERK_DIR + 'clerk_' + f + '.png'; }
+}
+
 function goldPop(n) {
   const g = $('#tbGold');
   const e = el('div', 'goldpop ' + (n < 0 ? 'neg' : ''), (n > 0 ? '+' : '') + n + 'G');
@@ -787,8 +808,7 @@ function render() {
   lob.classList.toggle('dawn', S.phase === 'morning');
   const dusk = busy() || S.phase === 'report' ? clamp((S.clock - 17 * 60) / (5 * 60), 0, 1) : 0;
   lob.style.setProperty('--dusk', dusk.toFixed(3));
-  const ci = $('#clerkImg'); const want = S.phase === 'night' ? 'img/clerk_rest.png' : 'img/clerk_work.png';
-  if (!ci.src.endsWith(want)) ci.src = want;
+  renderClerk();
 }
 
 /* ---------- 重ね表示 ---------- */
@@ -943,7 +963,8 @@ function frame(t) {
   requestAnimationFrame(frame);
 }
 
-Promise.all([loadImg('adv', 'img/adventurers.png'), loadImg('bandage', 'img/bandage.png')]).then(() => {
+Promise.all([loadImg('adv', 'img/adventurers.png'), loadImg('bandage', 'img/bandage.png'),
+  ...CLERK_FACES.map(f => loadImg('clerk_' + f, CLERK_DIR + 'clerk_' + f + '.png'))]).then(() => {
   setup();
   requestAnimationFrame(frame);
 });

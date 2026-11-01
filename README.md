@@ -17,5 +17,7 @@
 - `js/data.js` … 調整用の数値（報酬・来訪間隔・在庫など）とデータ
 - `js/game.js` … ゲーム本体
 - `js/sound.js` … 効果音
-- `img/` … ドット絵。`clerk_work.png`（営業中）と `clerk_rest.png`（休憩）は直接手直しして差し替え可能
+- `img/` … ドット絵
+  - `img/newGraphic(clerk)/` … 受付嬢（ゲームが使うのはこちら）。`clerk_eyeopen`（通常）、`clerk_blink_1`→`clerk_blink_2`（まばたき）、`clerk_happy`（1パーティへの対応がすべてミスなく終わったとき）、`clerk_sad`（ミスをしたとき）、`clerk_rest`（深夜）
+  - `img/clerk_work.png`・`img/clerk_rest.png` は最初に生成した旧版（現在は未使用）
 - `tools/` … ドット絵の生成スクリプト（`python3 tools/gen_sprites.py` など。Pillow が必要）
