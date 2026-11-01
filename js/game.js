@@ -14,7 +14,6 @@ const rankIdx = r => RANKS.indexOf(r);
 const hhmm = m => { m = Math.floor(m); return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const META = window.ADV_META;
-const ITEM_NAME = { gel: '回復ジェル', elixir: '霊薬' };
 const STATE_LABEL = { empty: '空き', reception: '受注対応待ち', departing: '出発', quest: '進行中', returned: '終了対応待ち', leaving: '退出' };
 
 /* ---------- 画像 ---------- */
@@ -25,16 +24,17 @@ function loadImg(key, src) {
 
 /* ---------- 状態 ---------- */
 const S = {
-  day: 1, gold: CFG.START_GOLD, stock: { ...CFG.START_STOCK },
+  day: 1, gold: CFG.START_GOLD, shelf: makeShelf(CFG.START_STOCK), boxes: [], restock: false,
   clock: CFG.OPEN, phase: 'title', paused: false,
   slots: Array.from({ length: CFG.SLOTS }, (_, i) => ({ i, state: 'empty', party: null, until: 0, enter: false })),
-  selected: 0, hand: null, order: null, ordered: null, packages: [], sheet: null, nextArrival: CFG.OPEN + 8, seq: 1, rt: 0, stats: newStats(),
+  selected: 0, hand: null, order: null, ordered: null, sheet: null, nextArrival: CFG.OPEN + 8, seq: 1, rt: 0, stats: newStats(),
 };
 function newStats() {
   return {
     visitors: 0, approved: 0, approveWrong: 0, rejected: 0, rejectOk: 0, rejectReason: 0, rejectWrong: 0,
-    returned: 0, success: 0, fail: 0, allowances: 0, allowanceMiss: 0, gelUsed: 0, elixirUsed: 0,
+    returned: 0, success: 0, fail: 0, allowances: 0, allowanceMiss: 0,
     incomeHQ: 0, incomeOwner: 0, closedAway: 0, carriedIn: 0,
+    used: Object.fromEntries(ITEMS.map(k => [k, 0])),
   };
 }
 const selSlot = () => S.slots[S.selected];
@@ -51,45 +51,96 @@ function evaluate(members, quest) {
   return {
     comp: !(cond1 || cond2),
     short: (quest.diff === 'A' && n <= 2) || (quest.diff === 'S' && n <= 3),
+    attr: attrDanger(members, externalAttr(quest)),
   };
+}
+const beats = (a, b) => !!(BEATS[a] && BEATS[a].includes(b));
+const memberAttr = m => FAITH_ATTR[m.faith] || null;
+// 外部属性：討伐なら魔物の属性、探索・護衛なら場所の環境の属性
+function externalAttr(q) {
+  if (!q.monster || !q.place) return null;
+  return q.type === '討伐' ? q.monster.attr : ENVS[q.place.env].attr;
+}
+// 冒険者の内部属性どうしで属性相性が生じている組 [有利側, 不利側]
+function attrPairs(members) {
+  const at = members.map(memberAttr).filter(Boolean);
+  const out = [];
+  for (let i = 0; i < at.length; i++) for (let j = i + 1; j < at.length; j++) {
+    if (beats(at[i], at[j])) out.push([at[i], at[j]]);
+    if (beats(at[j], at[i])) out.push([at[j], at[i]]);
+  }
+  return out;
+}
+function attrDanger(members, E) {
+  if (!E) return false;
+  const at = members.map(memberAttr).filter(Boolean);
+  if (E === '光') return !at.includes('闇');
+  if (E === '闇') return !at.includes('光');
+  if (E === '風') return attrPairs(members).length > 0;
+  const adv = at.filter(a => beats(a, E)).length;
+  const dis = at.filter(a => beats(E, a)).length;
+  return !(adv > dis);
+}
+// 帰還時に掛かる可能性のある状態異常（場所の環境・魔物の属性・風の外部属性での属性相性）
+function ailCandidates(p) {
+  const q = p.quest;
+  if (!q.monster || !q.place) return [];
+  const set = new Set(ENVS[q.place.env].ail);
+  if (ATTR_AIL[q.monster.attr]) set.add(ATTR_AIL[q.monster.attr]);
+  if (externalAttr(q) === '風') for (const [a] of attrPairs(p.members)) if (ATTR_AIL[a]) set.add(ATTR_AIL[a]);
+  return [...set];
 }
 const problemsOf = ev => REASONS.filter(r => ev[r.id]).map(r => r.id);
 const reasonText = ids => ids.map(id => REASONS.find(r => r.id === id).label).join('・');
 
 /* ---------- パーティの生成 ---------- */
+function genQuest(base, maxH) {
+  const type = pick(QUEST_TYPES);
+  const diff = RANKS[clamp(base + +weighted({ '-1': 22, 0: 45, 1: 26, 2: 7 }), 0, 3)];
+  const mo = pick(MONSTERS.filter(m => m[2].includes(diff)));
+  const env = pick(Object.keys(ENVS));
+  const [terrains, descs] = PLACE_BY_ENV[env];
+  return {
+    type, diff, hours: randi(1, maxH),
+    monster: { name: mo[0], attr: mo[1], traits: shuffle(MONSTER_TRAITS).slice(0, 2), damage: pick(MONSTER_DAMAGE) },
+    place: { name: pick(PLACE_PROPER) + pick(terrains), env, realm: pick(PLACE_REALM), desc: pick(descs) },
+  };
+}
+function categoryOf(ev) {
+  const pr = problemsOf(ev);
+  return pr.length === 0 ? 'fit' : pr.length >= 2 ? 'multi' : pr[0];
+}
 function genParty() {
   const used = new Set(S.slots.filter(s => s.party).flatMap(s => s.party.members.map(m => m.gid)));
   const pool = [...Array(META.chars.length).keys()].filter(g => !used.has(g));
   const target = weighted(CFG.CATEGORY_WEIGHT);
   const maxH = clamp(Math.floor((CFG.CLOSE - S.clock) / 60), 1, 5);
   let best = null;
-  for (let t = 0; t < 500; t++) {
+  for (let t = 0; t < 800; t++) {
     const n = Math.min(pool.length, +weighted({ 1: 10, 2: 28, 3: 36, 4: 26 }));
     const base = +weighted({ 0: 34, 1: 30, 2: 23, 3: 13 });
     const members = shuffle(pool).slice(0, n).map(gid => {
       const look = META.chars[gid].look;
       const job = Math.random() < LOOK_MATCH_RATE ? LOOK_JOB[look] : pick(JOBS);
       const r = clamp(base - (Math.random() < 0.35 ? 1 : 0) + (Math.random() < 0.1 ? 1 : 0), 0, 3);
-      return { gid, job, rank: RANKS[r], status: 'ok', name: '' };
+      return { gid, job, rank: RANKS[r], faith: weighted(FAITH_WEIGHT), status: 'ok', ail: null, name: '' };
     });
-    const type = pick(QUEST_TYPES);
-    const diff = RANKS[clamp(base + +weighted({ '-1': 22, 0: 45, 1: 26, 2: 7 }), 0, 3)];
-    const quest = { type, diff, hours: randi(1, maxH) };
+    const quest = genQuest(base, maxH);
     const ev = evaluate(members, quest);
-    const cat = ev.comp && ev.short ? 'both' : ev.comp ? 'comp' : ev.short ? 'short' : 'fit';
     best = { members, quest, ev };
-    if (cat === target) break;
+    if (categoryOf(ev) === target) break;
   }
   const usedNames = new Set();
   for (const m of best.members) {
     const list = NAMES[META.chars[m.gid].g].filter(n => !usedNames.has(n));
     m.name = pick(list); usedNames.add(m.name);
   }
-  best.quest.title = pick(QUEST_TITLES[best.quest.type][best.quest.diff]);
+  const q = best.quest;
+  q.title = pick(QUEST_TITLE_TPL[q.type]).replace('{m}', q.monster.name).replace('{p}', q.place.name);
   return {
-    id: S.seq++, members: best.members, quest: best.quest, ev: best.ev,
+    id: S.seq++, members: best.members, quest: q, ev: best.ev,
     name: best.members[0].name + 'のパーティ',
-    checks: { comp: false, short: false }, mistakes: 0, wrongApproval: false,
+    checks: Object.fromEntries(REASONS.map(r => [r.id, false])), mistakes: 0, wrongApproval: false,
     counter: [], bubble: null, outcome: null, departAt: 0, plannedReturn: 0, returnAt: 0, stamped: false,
   };
 }
@@ -142,6 +193,10 @@ function approve(slot) {
     p.outcome = 'fail';
     p.returnAt = S.clock + Math.max(10, Math.round(p.quest.hours * 60 * rand(CFG.WIPE_RETURN[0], CFG.WIPE_RETURN[1])));
   }
+  // 状態異常：生存者は怪我と同じ確率で、候補から等しい確率で1つ
+  const cands = ailCandidates(p);
+  const rate = probs.length === 0 ? CFG.HURT_RATE_FIT : CFG.HURT_RATE_UNFIT;
+  for (const m of p.members) m.ail = (m.status !== 'ghost' && cands.length && Math.random() < rate) ? pick(cands) : null;
   say(p, LINES.approve, CFG.DEPART_SEC);
   slot.state = 'departing'; slot.until = S.rt + CFG.DEPART_SEC;
 }
@@ -189,18 +244,48 @@ function partyReturns(slot) {
 }
 
 /* 手当 */
-function takeItem(kind) {
+function requiredItems(p) {
+  const need = Object.fromEntries(ITEMS.map(k => [k, 0]));
+  for (const m of p.members) {
+    if (m.status === 'ghost') { need.elixir++; continue; }
+    if (m.status === 'hurt') need.gel++;
+    if (m.ail) need[AIL_ITEM[m.ail]]++;
+  }
+  return need;
+}
+
+/* 棚（30マス。null は空き） */
+function makeShelf(stock) {
+  const sh = Array(CFG.SHELF_MAX).fill(null);
+  let i = 0;
+  for (const k of ITEMS) for (let n = 0; n < (stock[k] || 0) && i < sh.length; n++) sh[i++] = k;
+  return sh;
+}
+const stockOf = k => S.shelf.filter(x => x === k).length;
+const shelfCount = () => S.shelf.filter(Boolean).length;
+function shelfPut(kind) {
+  const i = S.shelf.indexOf(null);
+  if (i < 0) return false;
+  S.shelf[i] = kind; return true;
+}
+function moveShelf(from, to) {
+  if (from === to || !S.shelf[from]) return;
+  [S.shelf[from], S.shelf[to]] = [S.shelf[to], S.shelf[from]];
+  SFX.soft();
+}
+function takeItem(idx) {
   const slot = selSlot(); const p = slot.party;
   if (slot.state !== 'returned' || !p || p.stamped) return;
-  if (S.stock[kind] <= 0) { toast(`棚に${ITEM_NAME[kind]}がありません`, 'bad'); return; }
-  S.stock[kind]--; p.counter.push({ kind, tagged: false }); SFX.clink();
+  const kind = S.shelf[idx]; if (!kind) return;
+  S.shelf[idx] = null; p.counter.push({ kind, tagged: false }); SFX.clink();
 }
 function clickItem(idx) {
   const slot = selSlot(); const p = slot.party;
   if (slot.state !== 'returned' || !p || p.stamped) return;
   const it = p.counter[idx]; if (!it) return;
   if (S.hand === 'tag') { if (!it.tagged) { it.tagged = true; SFX.tag(); } return; }
-  p.counter.splice(idx, 1); S.stock[it.kind]++; SFX.soft();
+  if (!shelfPut(it.kind)) { toast('棚に空きがありません', 'bad'); return; }
+  p.counter.splice(idx, 1); SFX.soft();
 }
 function toggleTag() {
   const slot = selSlot();
@@ -211,16 +296,16 @@ function stamp() {
   const slot = selSlot(); const p = slot.party;
   if (slot.state !== 'returned' || !p || p.stamped) return;
   p.stamped = true; S.hand = null; markFresh('seal' + p.id); SFX.stamp();
-  const need = { gel: p.members.filter(m => m.status === 'hurt').length, elixir: p.members.filter(m => m.status === 'ghost').length };
-  const got = { gel: p.counter.filter(c => c.kind === 'gel').length, elixir: p.counter.filter(c => c.kind === 'elixir').length };
+  const need = requiredItems(p);
+  const got = Object.fromEntries(ITEMS.map(k => [k, p.counter.filter(c => c.kind === k).length]));
   const miss = [];
-  if (need.gel !== got.gel || need.elixir !== got.elixir) miss.push('渡す数が不適切');
+  if (ITEMS.some(k => need[k] !== got[k])) miss.push('渡す数が不適切');
   if (p.counter.some(c => !c.tagged)) miss.push('タグの貼り忘れ');
   p.mistakes += miss.length;
   // 1パーティへの対応がすべてミスなく終わったときだけ嬉しそうにする
   if (miss.length) clerkFace('sad', 1.4); else if (!p.mistakes) clerkFace('happy', 1.6);
   S.stats.allowances++; S.stats.allowanceMiss += miss.length;
-  S.stats.gelUsed += got.gel; S.stats.elixirUsed += got.elixir;
+  for (const k of ITEMS) S.stats.used[k] += got[k];
   const tag = `窓口${slot.i + 1}：`;
   if (miss.length) toast(tag + '手当のミス：' + miss.join('・'), 'bad');
   if (p.outcome === 'success') {
@@ -266,43 +351,47 @@ function startDay() {
 /* ---------- 早朝・深夜 ---------- */
 const PACK_OF = { 2: 'pouch', 5: 'crate_s', 10: 'crate_l' };
 const PACK_NAME = { pouch: '皮製の小包', crate_s: '小さな木箱', crate_l: '大きな木箱' };
-const KINDS = ['gel', 'elixir'];
 
 function toMorning() {
-  S.phase = 'morning'; S.clock = CFG.OPEN - 10; S.hand = null; S.sheet = null; S.ordered = null;
-  S.packages = [];
-  if (S.order) for (const kind of KINDS) {
+  S.phase = 'morning'; S.clock = CFG.OPEN - 10; S.hand = null; S.sheet = null; S.ordered = null; S.restock = false;
+  let arrived = 0;
+  if (S.order) for (const kind of ITEMS) {
     const n = S.order[kind];
-    if (n) S.packages.push({ kind, n, left: n, type: PACK_OF[n], open: false });
+    if (n) { S.boxes.push({ kind, n, left: n, type: PACK_OF[n], open: false }); arrived++; }
   }
   S.order = null;
-  showScene(`${S.day}日目　早朝`, S.packages.length ? '荷物が届いています' : '');
-  toast(S.packages.length ? `${S.day}日目の朝。昨夜注文した支給品が届いています` : `${S.day}日目の朝。届いた荷物はありません`);
+  S.arrived = arrived;
+  showScene(`${S.day}日目　早朝`, arrived ? '荷物が届いています' : '');
+  toast(arrived ? `${S.day}日目の朝。昨夜注文した支給品が ${arrived}箱 届いています` : `${S.day}日目の朝。届いた荷物はありません`);
 }
+// 品出し：保管中の箱を広げて、中身を棚へ並べる（早朝・深夜のみ。途中でやめられる）
+function startRestock() { if (S.phase === 'morning' || S.phase === 'night') { S.restock = true; S.hand = null; SFX.creak(); } }
+function stopRestock() { S.restock = false; SFX.thump(); }
 function clickPackage(pk) {
   if (!pk.open) { pk.open = true; SFX.creak(); return; }
   if (pk.left > 0) { toast('中身を棚に並べ終えてから片付けます', 'bad'); return; }
-  S.packages = S.packages.filter(x => x !== pk); SFX.thump();
+  S.boxes = S.boxes.filter(x => x !== pk); SFX.thump();
 }
 function unpackOne(pk) {
   if (!pk.open || pk.left <= 0) return;
-  if (S.stock[pk.kind] >= CFG.SHELF_MAX) { toast(`棚の${ITEM_NAME[pk.kind]}がいっぱいです`, 'bad'); return; }
-  pk.left--; S.stock[pk.kind]++; SFX.clink();
+  if (!shelfPut(pk.kind)) { toast('棚に空きがありません。残りは箱のまま保管されます', 'bad'); return; }
+  pk.left--; SFX.clink();
 }
 function openBusiness() {
   if (S.phase !== 'morning') return;
-  if (S.packages.length) { toast('届いた荷物を片付けてから営業を始めます', 'bad'); return; }
+  S.restock = false;
   startDay();
 }
 function toNight() {
-  S.phase = 'night'; S.clock = CFG.CLOSE + 10; S.hand = null; S.sheet = null; S.ordered = null;
+  S.phase = 'night'; S.clock = CFG.CLOSE + 10; S.hand = null; S.sheet = null; S.ordered = null; S.restock = false;
   $('#reportOv').hidden = true;
   SFX.night(); showScene('深夜', '明日の準備をして休みます');
 }
 // 注文書
-function newSheet() { if (S.ordered || S.sheet) return; S.sheet = { gel: 0, elixir: 0 }; SFX.paper(); }
+const blankSheet = () => Object.fromEntries(ITEMS.map(k => [k, 0]));
+function newSheet() { if (S.ordered || S.sheet) return; S.sheet = blankSheet(); SFX.paper(); }
 function cancelSheet() { S.sheet = null; if (typeof S.hand === 'number') S.hand = null; SFX.paper(); }
-function discardSheet() { S.sheet = { gel: 0, elixir: 0 }; SFX.paper(); toast('注文書を捨てて、新しい用紙を出しました'); }
+function discardSheet() { S.sheet = blankSheet(); SFX.paper(); toast('注文書を捨てて、新しい用紙を出しました'); }
 function grabStamp(n) { if (S.ordered) return; S.hand = S.hand === n ? null : n; SFX.grab(); }
 function stampSlot(kind) {
   if (!S.sheet) return;
@@ -310,18 +399,19 @@ function stampSlot(kind) {
   if (S.sheet[kind]) { toast('この枠にはもう押してあります。書き直すなら注文書を捨てます', 'bad'); return; }
   S.sheet[kind] = S.hand; markFresh('os' + kind); SFX.stamp();
 }
-const sheetCost = sh => KINDS.reduce((a, k) => a + sh[k] * CFG.PRICE[k], 0);
+const sheetCost = sh => ITEMS.reduce((a, k) => a + sh[k] * CFG.PRICE[k], 0);
 function sendOrder() {
   if (S.ordered) return;
   const sh = S.sheet;
   if (!sh) { toast('封筒に入れる注文書がありません'); return; }
-  if (!sh.gel && !sh.elixir) { toast('注文書に何も書かれていません', 'bad'); return; }
-  for (const k of KINDS) {
-    if (S.stock[k] + sh[k] > CFG.SHELF_MAX) { toast(`${ITEM_NAME[k]}が棚に入りきりません（棚は${CFG.SHELF_MAX}個まで）`, 'bad'); return; }
+  const kinds = ITEMS.filter(k => sh[k]).length;
+  if (!kinds) { toast('注文書に何も書かれていません', 'bad'); return; }
+  if (S.boxes.length + kinds > CFG.BOX_MAX) {
+    toast(`保管できる箱は${CFG.BOX_MAX}個までです（保管中 ${S.boxes.length}箱＋今回 ${kinds}箱）`, 'bad'); return;
   }
   const cost = sheetCost(sh);
   if (cost > S.gold) { toast(`所持金が足りません（必要 ${cost}G／所持金 ${S.gold}G）`, 'bad'); return; }
-  S.gold -= cost; S.ordered = { gel: sh.gel, elixir: sh.elixir, cost }; S.sheet = null; S.hand = null;
+  S.gold -= cost; S.ordered = { ...sh, cost }; S.sheet = null; S.hand = null;
   SFX.paper(); SFX.coin(); goldPop(-cost);
   toast(`注文書を封筒に入れて道具屋へ送りました（支払い ${cost}G）`, 'good');
 }
@@ -337,20 +427,29 @@ const SAVE_KEY = 'guild-clerk-work-v1';
 function save() {
   const slots = S.slots.map(s => (s.state === 'quest' || s.state === 'departing') ? { party: { ...s.party, bubble: null } } : null);
   try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 1, day: S.day, gold: S.gold, stock: S.stock, order: S.order, seq: S.seq, slots }));
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 2, day: S.day, gold: S.gold, shelf: S.shelf, boxes: S.boxes, order: S.order, seq: S.seq, slots }));
   } catch (e) { /* 保存できない環境では何もしない */ }
 }
 function loadSave() {
-  try { const d = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); return d && d.v === 1 ? d : null; } catch (e) { return null; }
+  try {
+    const d = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
+    if (!d) return null;
+    if (d.v === 1) { // 以前の形式（品ごとの個数）を新しい棚に並べ直す
+      d.shelf = makeShelf(d.stock || {}); d.boxes = []; d.v = 2;
+    }
+    return d.v === 2 ? d : null;
+  } catch (e) { return null; }
 }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* noop */ } }
 function reset() {
-  Object.assign(S, { day: 1, gold: CFG.START_GOLD, stock: { ...CFG.START_STOCK }, order: null, ordered: null, packages: [], sheet: null, hand: null, seq: 1, selected: 0, stats: newStats() });
+  Object.assign(S, { day: 1, gold: CFG.START_GOLD, shelf: makeShelf(CFG.START_STOCK), boxes: [], restock: false, order: null, ordered: null, sheet: null, hand: null, seq: 1, selected: 0, stats: newStats() });
   for (const s of S.slots) { s.state = 'empty'; s.party = null; s.enter = false; }
 }
 function applySave(d) {
   reset();
-  Object.assign(S, { day: d.day, gold: d.gold, stock: { ...d.stock }, order: d.order, seq: d.seq });
+  const shelf = Array(CFG.SHELF_MAX).fill(null);
+  (d.shelf || []).forEach((k, i) => { if (i < shelf.length && ITEMS.includes(k)) shelf[i] = k; });
+  Object.assign(S, { day: d.day, gold: d.gold, shelf, boxes: (d.boxes || []).map(b => ({ ...b })), order: d.order, seq: d.seq });
   d.slots.forEach((x, i) => { if (x && S.slots[i]) { S.slots[i].state = 'quest'; S.slots[i].party = x.party; } });
 }
 
@@ -380,7 +479,7 @@ function update(dt) {
 /* ---------- スプライト ---------- */
 const TAIL = [[25, 8, 15], [26, 8, 15], [27, 9, 14], [28, 10, 14], [29, 11, 14], [30, 12, 14], [31, 13, 14]];
 const WISP = [[2, 2, '#bfe6ff'], [1, 3, '#bfe6ff'], [2, 3, '#ffffff'], [3, 3, '#bfe6ff'], [1, 4, '#7fb8ff'], [2, 4, '#ffffff'], [3, 4, '#7fb8ff'], [2, 5, '#7fb8ff']];
-function sprite(gid, status, scale) {
+function sprite(gid, status, scale, ail) {
   const { w, h, cols } = META;
   const c = el('canvas', 'px');
   c.width = w * scale; c.height = h * scale;
@@ -398,11 +497,22 @@ function sprite(gid, status, scale) {
     for (const [px, py, col] of WISP) { x.fillStyle = col; x.fillRect(px * scale, py * scale, scale, scale); }
     c.classList.add('ghost-float');
   } else {
-    x.drawImage(IMGS.adv, sx, sy, w, h, 0, 0, w * scale, h * scale);
-    if (status === 'hurt') x.drawImage(IMGS.bandage, 0, 0, w, h, 0, 0, w * scale, h * scale);
+    const o = document.createElement('canvas'); o.width = w; o.height = h;
+    const ox = o.getContext('2d');
+    ox.drawImage(IMGS.adv, sx, sy, w, h, 0, 0, w, h);
+    if (status === 'hurt') ox.drawImage(IMGS.bandage, 0, 0);
+    if (ail) {
+      ox.globalCompositeOperation = 'source-atop';
+      ox.fillStyle = AIL_TINT[ail]; ox.fillRect(0, 0, w, h);
+      ox.globalCompositeOperation = 'source-over';
+      ox.drawImage(IMGS['ail_' + ail], 0, 0);
+    }
+    x.drawImage(o, 0, 0, w * scale, h * scale);
+    if (ail === 'para') c.classList.add('para-shake');
   }
   return c;
 }
+const AIL_TINT = { burn: 'rgba(255,110,50,0.16)', chill: 'rgba(140,200,255,0.38)', para: 'rgba(255,230,70,0.18)', poison: 'rgba(140,70,190,0.32)' };
 function itemImg(kind, cls) { const i = el('img', 'px ' + (cls || '')); i.src = `img/item_${kind}.png`; i.alt = ITEM_NAME[kind] || ''; return i; }
 
 /* ---------- 画面 ---------- */
@@ -493,7 +603,7 @@ function buildBooth(s) {
   if (s.enter) { party.classList.add('enter'); s.enter = false; }
   if (s.state === 'leaving' || s.state === 'departing') party.classList.add('leave');
   const showStatus = s.state === 'returned' || (s.state === 'leaving' && p.stamped);
-  for (const m of p.members) party.appendChild(sprite(m.gid, showStatus ? m.status : 'ok', 2));
+  for (const m of p.members) party.appendChild(sprite(m.gid, showStatus ? m.status : 'ok', 2, showStatus && m.status !== 'ghost' ? m.ail : null));
   b.root.appendChild(party);
   const bt = bubbleText(p);
   if (bt) b.root.appendChild(el('div', 'bubble', bt));
@@ -512,33 +622,53 @@ function renderBooths() {
 }
 
 let deskKey = '', deskBar = null;
-function memberCard(m, status, cls) {
+function memberCard(m, status, cls, ail) {
   const c = el('div', 'member ' + (cls || ''));
-  c.appendChild(sprite(m.gid, status, 3));
+  c.appendChild(sprite(m.gid, status, 3, ail));
   const meta = el('div', 'meta');
   meta.appendChild(el('div', 'nm', m.name));
   const jb = el('div', 'jb');
   jb.appendChild(el('span', '', m.job));
   jb.appendChild(el('span', 'rank ' + m.rank, m.rank));
   meta.appendChild(jb);
+  if (m.faith) meta.appendChild(el('div', 'fa', '信仰：' + m.faith));
   c.appendChild(meta);
   return c;
 }
 function questSheet(q, p) {
   const sh = el('div', 'sheet quest-sheet');
-  sh.appendChild(el('h3', '', 'クエスト受注申請書'));
-  for (const [k, v] of [['概要', q.type], ['難易度', q.diff + '級'], ['所要時間', q.hours + '時間'], ['人数', p.members.length + '人']]) {
-    const r = el('div', 'qrow'); r.appendChild(el('span', 'k', k)); r.appendChild(el('span', 'v', v)); sh.appendChild(r);
+  sh.appendChild(el('h3', '', q.title ? `「${q.title}」` : 'クエスト受注申請書'));
+  const top = el('div', 'qtop');
+  for (const [k, v] of [['概要', q.type], ['難易度', q.diff + '級'], ['所要', q.hours + '時間'], ['人数', p.members.length + '人']]) {
+    const c = el('div', 'qc'); c.appendChild(el('span', 'k', k)); c.appendChild(el('b', '', v)); top.appendChild(c);
   }
-  sh.appendChild(el('div', 'qflavor', `「${q.title}」`));
+  sh.appendChild(top);
+  const block = (title, rows) => {
+    const b = el('div', 'qblock');
+    b.appendChild(el('div', 'qbh', title));
+    for (const [k, v, strong] of rows) {
+      const r = el('div', 'qr' + (strong ? ' st' : ''));
+      r.appendChild(el('span', 'k', k)); r.appendChild(el('span', 'v', v));
+      b.appendChild(r);
+    }
+    sh.appendChild(b);
+  };
+  if (q.monster) {
+    block(q.type === '討伐' ? '魔物（討伐対象）' : '魔物（出没）', [
+      ['名前', q.monster.name], ['属性', q.monster.attr || 'なし', true],
+      ['特徴', q.monster.traits.join('／')], ['被害', q.monster.damage]]);
+  }
+  if (q.place) {
+    block('場所', [['名前', q.place.name], ['環境', q.place.env, true], ['領土', q.place.realm], ['説明', q.place.desc]]);
+  }
   if (p.decision) sh.appendChild(el('div', 'decision-stamp ' + p.decision + freshCls('dec' + p.id), p.decision === 'approve' ? '認可' : '却下'));
   return sh;
 }
 function deskKeyOf() {
   const s = selSlot(); const p = s.party;
-  if (S.phase === 'morning' || S.phase === 'night') return S.phase + JSON.stringify([S.packages, S.sheet, S.ordered, S.hand, S.gold]);
+  if (S.phase === 'morning' || S.phase === 'night') return S.phase + JSON.stringify([S.restock, S.boxes, S.sheet, S.ordered, S.hand, S.gold, S.shelf]);
   let k = S.selected + '|' + s.state + '|' + (p ? p.id : '') + '|' + S.hand + '|' + S.phase;
-  if (p) k += '|' + p.decision + '|' + p.checks.comp + p.checks.short + '|' + p.counter.map(c => c.kind[0] + (c.tagged ? 1 : 0)).join('') + '|' + p.stamped;
+  if (p) k += '|' + p.decision + '|' + REASONS.map(r => +!!p.checks[r.id]).join('') + '|' + p.counter.map(c => c.kind + (c.tagged ? 1 : 0)).join(',') + '|' + p.stamped;
   return k;
 }
 function renderDesk() {
@@ -549,6 +679,7 @@ function renderDesk() {
   }
   deskKey = k; deskBar = null;
   const d = $('#desk'); d.innerHTML = '';
+  if ((S.phase === 'morning' || S.phase === 'night') && S.restock) return deskRestock(d);
   if (S.phase === 'morning') return deskMorning(d);
   if (S.phase === 'night') return deskNight(d);
   const s = selSlot(); const p = s.party;
@@ -614,7 +745,7 @@ function deskReturned(d, s, p, head) {
   flag.style.position = 'static'; flag.style.marginLeft = 'auto'; flag.style.fontSize = '14px'; flag.style.padding = '0 10px';
   head.appendChild(flag);
   const mem = el('div', 'members wide');
-  for (const m of p.members) mem.appendChild(memberCard(m, m.status));
+  for (const m of p.members) mem.appendChild(memberCard(m, m.status, '', m.status !== 'ghost' ? m.ail : null));
   d.appendChild(mem);
   d.appendChild(el('div', 'hint-line', p.stamped ? '手当を渡しました。' : '棚から品を取ってカウンターへ。カウンターの品をクリックすると棚に戻します。'));
   const tray = el('div', 'tray');
@@ -645,23 +776,53 @@ function deskReturned(d, s, p, head) {
   d.appendChild(tray);
 }
 
+function boxSummary() {
+  const n = S.boxes.length;
+  const items = S.boxes.reduce((a, b) => a + b.left, 0);
+  return n ? `保管中の箱 ${n}/${CFG.BOX_MAX}（品物 ${items}個）` : `保管中の箱 0/${CFG.BOX_MAX}`;
+}
 function deskMorning(d) {
   const head = el('div', 'desk-head');
   head.appendChild(el('span', '', '早朝'));
-  head.appendChild(el('span', 'sub', '支給品の受け取り'));
+  head.appendChild(el('span', 'sub', '開店の準備'));
   d.appendChild(head);
-  const area = el('div', 'packs');
-  if (!S.packages.length) area.appendChild(el('div', 'packs-empty', '棚の準備はできています。'));
-  for (const pk of S.packages) {
-    const box = el('div', 'pack');
+  const info = el('div', 'phase-info');
+  info.appendChild(el('div', 'pi-big', S.arrived ? `昨夜注文した支給品が ${S.arrived}箱 届きました。` : '今朝届いた荷物はありません。'));
+  info.appendChild(el('div', '', boxSummary()));
+  info.appendChild(el('div', '', `棚 ${shelfCount()}/${CFG.SHELF_MAX}`));
+  const carried = S.slots.filter(s => s.state === 'quest').length;
+  if (carried) info.appendChild(el('div', '', `前日からクエスト中のパーティ ${carried}組は、営業開始と同時に帰還します。`));
+  info.appendChild(el('div', 'pi-note', '品出しをすると、箱の中身を棚に並べられます。棚は右側でドラッグして並べ替えられます。'));
+  d.appendChild(info);
+  const foot = el('div', 'phase-foot');
+  foot.appendChild(el('div', 'phase-note', ''));
+  const rs = el('button', 'btn', `品出しへ（箱 ${S.boxes.length}個）`);
+  rs.addEventListener('click', startRestock);
+  foot.appendChild(rs);
+  const go = el('button', 'btn go', '営業開始');
+  go.addEventListener('click', openBusiness);
+  foot.appendChild(go);
+  d.appendChild(foot);
+}
+
+function deskRestock(d) {
+  const head = el('div', 'desk-head');
+  head.appendChild(el('span', '', '品出し'));
+  head.appendChild(el('span', 'sub', boxSummary() + `　／　棚 ${shelfCount()}/${CFG.SHELF_MAX}`));
+  d.appendChild(head);
+  const area = el('div', 'boxes');
+  if (!S.boxes.length) area.appendChild(el('div', 'packs-empty', '保管中の箱はありません。'));
+  for (const pk of S.boxes) {
+    const box = el('div', 'box');
     const b = el('button', 'pack-btn ' + pk.type);
     const im = el('img', 'px'); im.src = `img/item_${pk.type}${pk.open ? '_open' : ''}.png`; im.alt = PACK_NAME[pk.type];
     b.appendChild(im);
+    b.title = !pk.open ? 'クリックで開ける' : pk.left ? '中身をクリックして棚へ' : 'クリックで片付ける';
     b.addEventListener('click', () => clickPackage(pk));
     box.appendChild(b);
-    box.appendChild(el('div', 'pack-name', `${PACK_NAME[pk.type]}（${ITEM_NAME[pk.kind]} ${pk.n}個）`));
-    box.appendChild(el('div', 'pack-cap', !pk.open ? 'クリックで開ける' : pk.left ? '中身をクリックして棚へ' : '空になった。包みをクリックで片付ける'));
-    if (pk.open) {
+    box.appendChild(el('div', 'pack-name', `${ITEM_NAME[pk.kind]} ${pk.left}/${pk.n}`));
+    box.appendChild(el('div', 'pack-cap', !pk.open ? '開ける' : pk.left ? '中身を棚へ' : '片付ける'));
+    if (pk.open && pk.left) {
       const row = el('div', 'pack-items');
       for (let i = 0; i < pk.left; i++) {
         const it = el('button', 'item');
@@ -674,14 +835,9 @@ function deskMorning(d) {
     area.appendChild(box);
   }
   d.appendChild(area);
-  const foot = el('div', 'phase-foot');
-  const carried = S.slots.filter(s => s.state === 'quest').length;
-  foot.appendChild(el('div', 'phase-note', (carried ? `前日からクエスト中のパーティ ${carried}組は、営業開始と同時に帰還します。` : '') + (S.packages.length ? '荷物を片付けると営業を始められます。' : '')));
-  const go = el('button', 'btn go', '営業開始');
-  go.disabled = S.packages.length > 0;
-  go.addEventListener('click', openBusiness);
-  foot.appendChild(go);
-  d.appendChild(foot);
+  const back = el('button', 'btn go', '品出しをやめる');
+  back.addEventListener('click', stopRestock);
+  d.appendChild(back);
 }
 
 function deskNight(d) {
@@ -704,17 +860,24 @@ function deskNight(d) {
   if (S.ordered) {
     const sh = el('div', 'sheet order-sheet');
     sh.appendChild(el('h3', '', '注文済み'));
-    for (const k of KINDS) sh.appendChild(el('div', 'orow', `${ITEM_NAME[k]}　${S.ordered[k] ? S.ordered[k] + '個' : '—'}`));
+    for (const k of ITEMS) {
+      const r = el('div', 'orow');
+      r.appendChild(itemImg(k, 'oicon'));
+      r.appendChild(el('span', 'oname', ITEM_NAME[k]));
+      r.appendChild(el('span', 'oprice', S.ordered[k] ? S.ordered[k] + '個' : '—'));
+      sh.appendChild(r);
+    }
     sh.appendChild(el('div', 'orow total', `支払い ${S.ordered.cost}G`));
     sh.appendChild(el('div', 'onote', '明日の早朝に届きます。'));
     d.appendChild(sh);
   } else if (S.sheet) {
     const sh = el('div', 'sheet order-sheet');
     sh.appendChild(el('h3', '', '支給品 注文書'));
-    for (const k of KINDS) {
+    for (const k of ITEMS) {
       const r = el('div', 'orow');
+      r.appendChild(itemImg(k, 'oicon'));
       r.appendChild(el('span', 'oname', ITEM_NAME[k]));
-      r.appendChild(el('span', 'oprice', `単価 ${CFG.PRICE[k]}G`));
+      r.appendChild(el('span', 'oprice', `${CFG.PRICE[k]}G`));
       const slot = el('button', 'oslot' + (S.sheet[k] ? ' done' + freshCls('os' + k) : ''));
       slot.appendChild(el('span', '', S.sheet[k] ? String(S.sheet[k]) : ''));
       slot.title = 'ハンコを持ってクリック（空欄は0個）';
@@ -736,18 +899,29 @@ function deskNight(d) {
     pad.addEventListener('click', newSheet);
     d.appendChild(pad);
   }
+  // 在庫と使用量の表
+  const memo = el('table', 'night-memo');
+  const hr = el('tr'); for (const t of ['', '棚', '箱', '本日使用', '単価']) hr.appendChild(el('th', '', t)); memo.appendChild(hr);
+  for (const k of ITEMS) {
+    const tr = el('tr');
+    tr.appendChild(el('td', 'nm', ITEM_NAME[k]));
+    tr.appendChild(el('td', '', String(stockOf(k))));
+    tr.appendChild(el('td', '', String(S.boxes.filter(b => b.kind === k).reduce((a, b) => a + b.left, 0))));
+    tr.appendChild(el('td', '', String(S.stats.used[k])));
+    tr.appendChild(el('td', '', CFG.PRICE[k] + 'G'));
+    memo.appendChild(tr);
+  }
+  d.appendChild(memo);
+  d.appendChild(el('div', 'night-sub', `棚 ${shelfCount()}/${CFG.SHELF_MAX}　${boxSummary()}`));
   // 封筒
   const env = el('button', 'envelope' + (S.ordered ? ' sent' : ''));
   env.appendChild(itemImg('envelope'));
   env.appendChild(el('div', '', S.ordered ? '送付済み' : '封筒に入れて送る'));
   env.addEventListener('click', sendOrder);
   d.appendChild(env);
-  // メモ
-  const memo = el('div', 'night-memo');
-  memo.appendChild(el('div', '', `本日使った品：回復ジェル ${S.stats.gelUsed}個・霊薬 ${S.stats.elixirUsed}個`));
-  memo.appendChild(el('div', '', `価格：回復ジェル ${CFG.PRICE.gel}G・霊薬 ${CFG.PRICE.elixir}G`));
-  memo.appendChild(el('div', '', `棚は各${CFG.SHELF_MAX}個まで`));
-  d.appendChild(memo);
+  const rs = el('button', 'btn night-restock', `品出しへ（箱 ${S.boxes.length}個）`);
+  rs.addEventListener('click', startRestock);
+  d.appendChild(rs);
   const go = el('button', 'btn go', '次の日へ');
   go.addEventListener('click', nextDay);
   d.appendChild(go);
@@ -766,31 +940,37 @@ function renderHand() {
 let shelfKey = '';
 function renderShelf() {
   const s = selSlot();
-  const can = s.state === 'returned' && s.party && !s.party.stamped;
-  const k = S.stock.gel + '|' + S.stock.elixir + '|' + can + '|' + S.phase;
+  const can = busy() && s.state === 'returned' && s.party && !s.party.stamped;
+  const drag = S.phase === 'morning' || S.phase === 'night';
+  const k = S.shelf.join(',') + '|' + can + '|' + S.phase;
   if (k === shelfKey) return;
   shelfKey = k;
   const sh = $('#shelf'); sh.innerHTML = '';
-  sh.appendChild(el('h3', '', '支給品棚'));
-  for (const kind of ['gel', 'elixir']) {
-    const c = el('div', 'compart' + (can ? ' can' : ''));
-    const cap = el('div', 'cap');
-    cap.appendChild(el('span', '', ITEM_NAME[kind]));
-    const n = el('b', '', `${S.stock[kind]} / ${CFG.SHELF_MAX}`); cap.appendChild(n);
-    c.appendChild(cap);
-    const g = el('div', 'grid');
-    for (let i = 0; i < CFG.SHELF_MAX; i++) {
-      const sp = el('span', i < S.stock[kind] ? '' : 'no');
-      if (i < S.stock[kind]) sp.appendChild(itemImg(kind));
-      g.appendChild(sp);
+  sh.appendChild(el('h3', '', `支給品棚　${shelfCount()}/${CFG.SHELF_MAX}`));
+  const g = el('div', 'sgrid' + (can ? ' can' : ''));
+  S.shelf.forEach((kind, i) => {
+    const cell = el('div', 'scell' + (kind ? '' : ' empty'));
+    if (kind) {
+      const im = itemImg(kind);
+      im.title = ITEM_NAME[kind];
+      if (drag) {
+        im.draggable = true;
+        im.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', String(i)); e.dataTransfer.effectAllowed = 'move'; cell.classList.add('dragging'); });
+        im.addEventListener('dragend', () => cell.classList.remove('dragging'));
+      } else im.draggable = false;
+      cell.appendChild(im);
+      if (can) cell.addEventListener('click', () => takeItem(i));
     }
-    c.appendChild(g);
-    c.addEventListener('click', () => takeItem(kind));
-    sh.appendChild(c);
-  }
-  const note = S.phase === 'morning' ? '開けた包みの中身をクリックすると、ここに並びます。'
-    : S.phase === 'night' ? '明日の分が足りなければ、注文書で道具屋に注文します。'
-    : can ? 'クリックで1つ取り出します。' : '帰還したパーティの窓口を選ぶと、ここから品を取り出せます。';
+    if (drag) {
+      cell.addEventListener('dragover', e => { e.preventDefault(); cell.classList.add('over'); });
+      cell.addEventListener('dragleave', () => cell.classList.remove('over'));
+      cell.addEventListener('drop', e => { e.preventDefault(); cell.classList.remove('over'); const from = +e.dataTransfer.getData('text/plain'); moveShelf(from, i); });
+    }
+    g.appendChild(cell);
+  });
+  sh.appendChild(g);
+  const note = drag ? 'ドラッグで並べ替えられます。'
+    : can ? '品をクリックしてカウンターに出します。' : '帰還したパーティの窓口を選ぶと、ここから品を出せます。';
   sh.appendChild(el('div', 'shelf-note', note));
 }
 
@@ -802,7 +982,7 @@ function renderTop() {
   if (st.textContent !== txt) st.textContent = txt;
   st.classList.toggle('closed', S.phase !== 'business');
   $('#tbGold').textContent = S.gold;
-  $('#tbStock').textContent = `回復ジェル ${S.stock.gel}　霊薬 ${S.stock.elixir}`;
+  $('#tbStock').textContent = `棚 ${shelfCount()}/${CFG.SHELF_MAX}　箱 ${S.boxes.length}/${CFG.BOX_MAX}`;
 }
 
 function render() {
@@ -836,13 +1016,12 @@ function showReport() {
     ['翌日へ持ち越し', carried + '組'],
     ['手当の対応', st.allowances + '件'],
     ['手当のミス', st.allowanceMiss + '件', st.allowanceMiss],
-    ['使った回復ジェル', st.gelUsed + '個'],
-    ['使った霊薬', st.elixirUsed + '個'],
+    ...ITEMS.map(k => ['使った' + ITEM_NAME[k], st.used[k] + '個']),
     ['h', '収入と在庫'],
     ['運営本部から', st.incomeHQ + 'G'],
     ['依頼主から', st.incomeOwner + 'G'],
-    ['棚の回復ジェル', `${S.stock.gel} / ${CFG.SHELF_MAX}`],
-    ['棚の霊薬', `${S.stock.elixir} / ${CFG.SHELF_MAX}`],
+    ['棚の品物', `${shelfCount()} / ${CFG.SHELF_MAX}`],
+    ['保管中の箱', `${S.boxes.length} / ${CFG.BOX_MAX}`],
     ['total', `本日の収入 ${st.incomeHQ + st.incomeOwner}G　／　所持金 ${S.gold}G`],
   ];
   const g = el('div', 'rep-grid');
@@ -860,35 +1039,64 @@ function showReport() {
 function buildRules() {
   const strong = {};
   for (const j of JOBS) (strong[JOB_STRONG[j]] = strong[JOB_STRONG[j]] || []).push(j);
+  const envBy = {};
+  for (const [e, v] of Object.entries(ENVS)) (envBy[v.attr || 'なし'] = envBy[v.attr || 'なし'] || []).push(e);
+  const faithBy = a => Object.keys(FAITH_ATTR).find(f => FAITH_ATTR[f] === a);
+  const ailEnv = a => Object.keys(ENVS).filter(e => ENVS[e].ail.includes(a)).join('・');
+  const ailAttr = a => Object.keys(ATTR_AIL).find(k => ATTR_AIL[k] === a);
+  const icon = k => `<img class="px ricon" src="img/item_${k}.png" alt="">`;
   $('#rulesBody').innerHTML = `
   <h3>受注の判断</h3>
-  <p>クエストの<b>概要</b>と<b>難易度</b>、パーティの<b>人数</b>と各メンバーの<b>職業・冒険者ランク</b>で判断します（所要時間は関係ありません）。</p>
+  <p>次の3つのどれにも当たらなければ認可します。当たる場合は、当てはまる理由を<b>すべて</b>選んで却下します（所要時間は判断に関係ありません）。</p>
+  <h4>構成上の危険</h4>
   <table><tr><th>概要</th><th>得意な職業</th></tr>
   ${QUEST_TYPES.map(t => `<tr><td>${t}</td><td>${strong[t].join('・')}</td></tr>`).join('')}</table>
-  <p>冒険者ランクと難易度は低い順に C → B → A → S。</p>
-  <p>次のどちらかを満たせば、構成は適しています。</p>
+  <p>冒険者ランクと難易度は低い順に C → B → A → S。次のどちらも満たさない場合は構成上の危険です。</p>
   <ol>
     <li>「難易度以上のランク」で、かつ「概要が得意な職業」のメンバーが<b>1人以上</b>いる</li>
     <li>「難易度以上のランク」か「概要が得意な職業」の<b>どちらかを満たす</b>メンバーが<b>3人以上</b>いる</li>
   </ol>
-  <p>どちらも満たさない場合は <b>構成上の危険</b>。<br>
-  A級を2人以下、S級を3人以下で受ける場合は <b>人員不足</b>。</p>
-  <p>どちらにも当たらなければ認可します。当たる場合は、当てはまる理由を<b>すべて</b>選んで却下します。</p>
+  <h4>人員不足</h4>
+  <p>A級を2人以下、S級を3人以下で受ける場合。</p>
+  <h4>属性の危険</h4>
+  <p>クエストの<b>外部属性</b>は、概要が討伐なら「魔物」欄の<b>属性</b>、探索・護衛なら「場所」欄の<b>環境</b>で決まります（外部属性がないこともあります）。
+  冒険者の<b>内部属性</b>は<b>信仰</b>で決まります。</p>
+  <table><tr><th>属性</th><th>信仰</th><th>環境</th></tr>
+  ${ATTRS.map(a => `<tr><td>${a}</td><td>${faithBy(a)}</td><td>${envBy[a].join('・')}</td></tr>`).join('')}
+  <tr><td>なし</td><td>物神・無信仰</td><td>${envBy['なし'].join('・')}</td></tr></table>
+  <p>属性相性（左が右に有利）：火→草→水→火　／　火→氷→水→火　／　水→地→草→水　／　水→地→雷→水<br>風・光・闇には属性相性がありません。</p>
+  <ul>
+    <li>外部属性が<b>火・水・雷・氷・地・草</b>：外部属性に<b>有利</b>な内部属性の人数が、<b>不利</b>な内部属性の人数より<b>多く</b>なければ属性の危険（同数も危険）</li>
+    <li>外部属性が<b>光</b>：内部属性が闇の冒険者が1人もいなければ属性の危険</li>
+    <li>外部属性が<b>闇</b>：内部属性が光の冒険者が1人もいなければ属性の危険</li>
+    <li>外部属性が<b>風</b>：冒険者どうしの内部属性の間に属性相性が1組でもあれば属性の危険</li>
+  </ul>
   <h3>クエスト後手当</h3>
   <ul>
-    <li>包帯を巻いている（負傷した）メンバー1人につき <b>回復ジェル</b> 1つ</li>
-    <li>幽霊になったメンバー1人につき <b>霊薬</b> 1つ</li>
+    <li>包帯を巻いている（負傷した）メンバー1人につき ${icon('gel')}<b>回復ジェル</b> 1つ</li>
+    <li>幽霊になったメンバー1人につき ${icon('elixir')}<b>霊薬</b> 1つ（幽霊は状態異常に掛かりません）</li>
+    <li>状態異常1つにつき、対応する品を1つ（負傷と同時に掛かっていることもあります）</li>
+  </ul>
+  <table><tr><th>状態異常</th><th>見た目</th><th>渡す品</th><th>掛かる可能性がある場所・魔物</th></tr>
+    <tr><td>火傷</td><td>頭の上の小さな炎、焦げ跡</td><td>${icon('whale')}クジラ酒</td><td>環境：${ailEnv('burn')}／魔物の属性：${ailAttr('burn')}</td></tr>
+    <tr><td>凍え</td><td>青白い顔色、つらら</td><td>${icon('candy')}陽飴</td><td>環境：${ailEnv('chill')}／魔物の属性：${ailAttr('chill')}</td></tr>
+    <tr><td>麻痺</td><td>体の両脇の稲妻、震え</td><td>${icon('bband')}黒包帯</td><td>環境：${ailEnv('para')}／魔物の属性：${ailAttr('para')}</td></tr>
+    <tr><td>毒</td><td>紫の顔色、頭上の泡</td><td>${icon('neut')}中和剤</td><td>環境：${ailEnv('poison')}／魔物の属性：${ailAttr('poison')}</td></tr>
+  </table>
+  <p>外部属性が風のクエストで属性の危険があったまま出発した場合は、内部属性の属性相性の有利側の属性（火・氷・雷・草）に応じた状態異常にも掛かることがあります。</p>
+  <ul>
     <li>カウンターに出した品すべてに <b>ギルド支給品のタグ</b> を貼る</li>
     <li>書類にハンコを押すと、パーティがカウンターの品を受け取る</li>
   </ul>
-  <p>渡す数の誤り（在庫切れも含む）とタグの貼り忘れは、それぞれ1件のミスになり、報酬が減ります。</p>
-  <h3>支給品の注文（深夜）</h3>
+  <p>渡す数の誤り（品の種類違い・在庫切れも含む）とタグの貼り忘れは、それぞれ1件のミスになり、報酬が減ります。</p>
+  <h3>支給品の注文（深夜）と品出し</h3>
   <p>注文書の各品の枠に「2」「5」「10」のどれかのハンコを1回だけ押します（空欄は0個）。押し間違えたら注文書を捨てて書き直します。
-  封筒に入れると道具屋へ送られ、その場で代金を所持金から払います。所持金が足りないときや、棚（各${CFG.SHELF_MAX}個まで）に入りきらないときは送れません。
-  届いた品は翌日の早朝に、包みを開けて1つずつ棚に並べます。</p>
-  <p>単価：回復ジェル ${CFG.PRICE.gel}G・霊薬 ${CFG.PRICE.elixir}G</p>
+  封筒に入れると道具屋へ送られ、その場で代金を所持金から払います。所持金が足りないときは送れません。</p>
+  <p>品は品ごとに1箱で翌日の早朝に届き、<b>保管中の箱</b>になります。早朝か深夜に「品出し」で箱を開け、中身を棚に並べます。
+  棚は全部で${CFG.SHELF_MAX}個まで、保管できる箱は大きさを問わず${CFG.BOX_MAX}個までです。注文で届く箱を加えると${CFG.BOX_MAX}個を超える場合は送れません。</p>
+  <p>単価：${ITEMS.map(k => `${ITEM_NAME[k]} ${CFG.PRICE[k]}G`).join('・')}</p>
   <h3>報酬</h3>
-  <p>クエスト完了時は運営本部と依頼主から。正しく却下したときは運営本部から少額。全滅したときは報酬なし。</p>`;
+  <p>クエスト完了時は運営本部と依頼主から。正しく却下したときは運営本部から少額。全滅したときは報酬なし。不適の理由が2つ以上あるまま出発すると全滅します。</p>`;
 }
 
 /* ---------- 入力 ---------- */
@@ -969,11 +1177,12 @@ function frame(t) {
 }
 
 Promise.all([loadImg('adv', 'img/adventurers.png'), loadImg('bandage', 'img/bandage.png'),
+  ...AILMENTS.map(a => loadImg('ail_' + a, `img/ail_${a}.png`)),
   ...CLERK_FACES.map(f => loadImg('clerk_' + f, CLERK_DIR + 'clerk_' + f + '.png'))]).then(() => {
   setup();
   requestAnimationFrame(frame);
 });
 
 // 動作確認用（ブラウザのコンソールから参照できるようにしておく）
-window.__guild = { S, evaluate, update, save, loadSave };
+window.__guild = { S, evaluate, update, save, loadSave, attrDanger, ailCandidates, requiredItems, externalAttr, genParty, categoryOf };
 })();

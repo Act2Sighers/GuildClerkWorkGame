@@ -41,6 +41,7 @@ FIXED = {
     "Y": "#f2e6c4", "y": "#c7b48a",
     "R": "#d4453f", "r": "#8c2530",
     "B": "#5a3d2e", "b": "#3a271d",
+    "U": "#9a4ad0", "u": "#d8a8f8",
 }
 SKIN = {
     "light": ("#ffe0c8", "#f0b898", "#ff9fa8"),
@@ -219,6 +220,8 @@ def main():
     sheet.save(os.path.join(IMG, "adventurers.png"))
     band = outline(compose([(P.BANDAGE, False)], make_palette(CHARS[0])))
     band.save(os.path.join(IMG, "bandage.png"))
+    for name, grid in P.AILMENTS.items():
+        outline(compose([(grid, False)], make_palette(CHARS[0]))).save(os.path.join(IMG, f"ail_{name}.png"))
     data = {"w": P.W, "h": P.H, "cols": cols, "chars": meta}
     # ゲームは file:// でも動くよう JS として読み込む
     with open(os.path.join(ROOT, "js", "adv_meta.js"), "w", encoding="utf-8") as f:
