@@ -515,3 +515,49 @@ AILMENTS = {
         (3, 8, "U"), (2, 9, "u"), (4, 9, "u"), (3, 10, "U"),
     ])),
 }
+
+# ---------------- 冒険者ではない人物（NPC）用のパーツ ----------------
+OUTFIT["dress"] = pad([
+    ".......WWWWWWWWWW.......",  # 17
+    "......WWWOOOOOOWWW......",  # 18
+    ".....WWOOOOOOOOOOWW.....",  # 19
+    ".....WW.OOOOOOOO.WW.....",  # 20
+    ".....SS.OOOOOOOO.SS.....",  # 21
+    ".....SS.aaaaaaaa.SS.....",  # 22
+    ".....SS.OAAAAAAO.SS.....",  # 23
+    ".....SS.OAAAAAAO.SS.....",  # 24
+    ".......OOAAAAAAOO.......",  # 25
+    ".......OOAAAAAAOO.......",  # 26
+    "......OOOAAAAAAOOO......",  # 27
+    "......OOOAAAAAAOOO......",  # 28
+    "......oOOOAAAAOOOo......",  # 29
+    "......oooooooooooo......",  # 30
+    "........BB....BB........",  # 31
+], 17)
+
+HEADGEAR["beard"] = pad([
+    "......WWWW....WWWW......",  # 14
+    ".......WWWWWWWWWW.......",  # 15
+    "........WWWWWWWW........",  # 16
+    ".........WWWWWW.........",  # 17
+    "..........WWWW..........",  # 18
+], 14)
+
+
+def item_lute():
+    p = {(20, y): "k" for y in range(14, 21)}
+    p.update({(20, 13): "K", (21, 13): "K", (21, 14): "k"})
+    rows = {21: (18, 20), 22: (17, 21), 23: (17, 21), 24: (17, 21), 25: (18, 20)}
+    for y, (a, b) in rows.items():
+        for x in range(a, b + 1):
+            p[(x, y)] = "K"
+    p[(19, 23)] = "N"; p[(17, 24)] = "k"; p[(21, 24)] = "k"
+    return grid_from(p)
+
+
+def item_feather():
+    return grid_from({(17, 0): "R", (17, 1): "R", (18, 1): "R", (18, 2): "R", (19, 2): "r", (19, 3): "R"})
+
+
+ITEMS["lute"] = item_lute()
+ITEMS["feather"] = item_feather()

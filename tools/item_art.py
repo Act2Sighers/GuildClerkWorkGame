@@ -24,6 +24,8 @@ PAL = {
     "O": hx("#f2a33a"), "o": hx("#b86a1a"),
     "Q": hx("#4a4250"), "q": hx("#2a2230"),
     "P": hx("#cdb0ec"), "p": hx("#9070c0"), "H": hx("#f6f2fa"),
+    "E": hx("#f08ab0"), "e": hx("#b04a78"), "A": hx("#e8eef4"), "C": hx("#f2e2b8"), "c": hx("#b08850"),
+    "T": hx("#2c3e78"), "t": hx("#18224a"), "F": hx("#7ab84a"), "f": hx("#4a7a2a"),
 }
 
 ICONS = {
@@ -286,6 +288,170 @@ ICONS.update({
 })
 
 
+# ---------------- 一時保管の預かり物 ----------------
+def _blank(rows):
+    out = rows + ["." * 16] * (16 - len(rows))
+    return out
+
+
+def _swap(rows, table):
+    return ["".join(table.get(ch, ch) for ch in r) for r in rows]
+
+
+DEPOSITS = {
+    "watch": _blank([
+        "................",
+        ".......GG.......",
+        "......G..G......",
+        ".......GG.......",
+        ".....MMMMMM.....",
+        "....MAAAAAAM....",
+        "...MAAAANAAAM...",
+        "...MAAAANAAAM...",
+        "...MAAAANNNAM...",
+        "...MAAAAAAAAM...",
+        "...MAAAAAAAAM...",
+        "....MAAAAAAM....",
+        ".....MMMMMM.....",
+    ]),
+    "letters": _blank([
+        "................",
+        "................",
+        "................",
+        "..YYYYYYYYYYY...",
+        ".yYYYYYRYYYYYy..",
+        ".yYYyYYRYYyYYy..",
+        ".yYYYyYRYyYYYy..",
+        ".yRRRRRRRRRRRy..",
+        ".yYYYYYRYYYYYy..",
+        ".yYYYYYRYYYYYy..",
+        ".yyyyyyRyyyyyy..",
+        "..yyyyyyyyyyyy..",
+    ]),
+    "doll": _blank([
+        "................",
+        "......kKKk......",
+        ".....kKKKKk.....",
+        ".....KNKKNK.....",
+        ".....KKKKKK.....",
+        "......kKKk......",
+        "....kKKKKKKk....",
+        "...kK.KKKK.Kk...",
+        "...k..KKKK..k...",
+        "......KKKK......",
+        "......KkkK......",
+        ".....KK..KK.....",
+        ".....kk..kk.....",
+    ]),
+    "scarf": _blank([
+        "................",
+        "................",
+        "................",
+        "................",
+        "...RRRRRRRRRR...",
+        "..RRrRRRRRRrRR..",
+        "..RRRrRRRRrRRR..",
+        "...RRRrRRrRRR...",
+        "....RRRrrRRR....",
+        ".....RRRRRR.....",
+        "......RRRR......",
+        "......R.R.R.....",
+        ".....R.R.R.R....",
+    ]),
+    "keys": _blank([
+        "................",
+        "................",
+        ".....gGGGg......",
+        "....g.....g.....",
+        "....g.....g.....",
+        ".....gGGGg......",
+        "....G..G..G.....",
+        "....G..G..G.....",
+        "....G..G..G.....",
+        "...GG..GG.GG....",
+        "....G..G..G.....",
+        "...GG.GG...GG...",
+    ]),
+    "quill": _blank([
+        "................",
+        "...........WW...",
+        "..........WWWV..",
+        ".........WWWV...",
+        "........WWWV....",
+        ".......WWWV.....",
+        "......WWWV......",
+        ".....WWWV.......",
+        "....WWV.........",
+        "...WV...........",
+        "..N.............",
+        ".N..............",
+    ]),
+    "jewel": _blank([
+        "................",
+        "................",
+        "................",
+        "................",
+        "...PPPPPPPPPP...",
+        "..PppppppppppP..",
+        "..GGGGGGGGGGGG..",
+        "..PPPPPXXPPPPP..",
+        "..PPPPPGGPPPPP..",
+        "..PPPPPPPPPPPP..",
+        "..pppppppppppp..",
+        "..GGGGGGGGGGGG..",
+    ]),
+    "compass": _blank([
+        "................",
+        "................",
+        "................",
+        ".....gGGGGg.....",
+        "....gCCCCCCg....",
+        "...gCCCCRCCCg...",
+        "...gCCCRRCCCg...",
+        "...gCCCNNCCCg...",
+        "...gCCCWWCCCg...",
+        "...gCCCCWCCCg...",
+        "....gCCCCCCg....",
+        ".....gGGGGg.....",
+    ]),
+    "mittens": _blank([
+        "................",
+        "................",
+        "................",
+        "................",
+        "..UUU.....UUU...",
+        ".UUUUU...UUUUU..",
+        ".UUUUUU.UUUUUU..",
+        ".UUUUUU.UUUUUU..",
+        ".UUUUU...UUUUU..",
+        ".UUUUU...UUUUU..",
+        ".WWWWW...WWWWW..",
+        ".WWWWW...WWWWW..",
+    ]),
+}
+# 支給品に似た見た目のもの（形はほぼ同じで、色やラベルが違う）
+DEPOSITS["perfume"] = _swap(ICONS["gel"], {"k": "g", "K": "G", "R": "E"})
+DEPOSITS["perfume"][9] = "..VXXYEYEYYXxV.."
+DEPOSITS["perfume"][10] = "..VXXYYEYYYxxV.."
+DEPOSITS["perfume"][8] = "..VXwYYYYYYXXV.."
+DEPOSITS["ink"] = _swap(ICONS["elixir"], {"Z": "T", "z": "t", "G": "N", "g": "N", "w": "u"})
+DEPOSITS["drops"] = _swap(ICONS["whale"], {"U": "X", "u": "x"})
+DEPOSITS["drops"][8] = "....VXYYNYYV...."
+DEPOSITS["drops"][9] = "....VXYNNNYV...."
+DEPOSITS["caramel"] = _swap(ICONS["candy"], {"O": "C", "o": "c"})
+DEPOSITS["notebook"] = _swap(ICONS["bband"], {"G": "A"})
+DEPOSITS["notebook"][4:11] = [
+    "...qQQQQQQQQq...",
+    "...qQQQQAQQQq...",
+    "...qQQQAAAQQq...",
+    "...qQQAAAAAQq...",
+    "...qQQQAAAQQq...",
+    "...qQQAQQQAQq...",
+    "...qQQQQQQQQq...",
+]
+DEPOSITS["tea"] = _swap(ICONS["neut"], {"P": "F", "p": "f"})
+
+
 def crate_l(open_):
     """大きな木箱 24x24"""
     rows = []
@@ -369,6 +535,13 @@ def main():
     for k, rows in ICONS.items():
         icon(rows).save(os.path.join(IMG, f"item_{k}.png"))
     icon(crate_l(False)).save(os.path.join(IMG, "item_crate_l.png"))
+    for k, rows in DEPOSITS.items():
+        icon(rows).save(os.path.join(IMG, f"dep_{k}.png"))
+    if "--preview" in sys.argv:
+        dp = Image.new("RGBA", (len(DEPOSITS) * 80, 80), (120, 104, 92, 255))
+        for i, k in enumerate(DEPOSITS):
+            dp.alpha_composite(icon(DEPOSITS[k]).resize((80, 80), Image.NEAREST), (i * 80, 0))
+        dp.save("/tmp/dep_preview.png")
     icon(crate_l(True)).save(os.path.join(IMG, "item_crate_l_open.png"))
     lobby_bg().save(os.path.join(IMG, "bg_lobby.png"))
     if "--preview" in sys.argv:

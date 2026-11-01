@@ -188,7 +188,7 @@ CHARS = [
 
 
 def build_char(spec):
-    look = LOOK[spec["look"]]
+    look = LOOK[spec["look"]] if spec.get("look") in LOOK else spec
     pal = make_palette(spec)
     layers = []
     hair = spec["hair"]
@@ -205,7 +205,47 @@ def build_char(spec):
             layers.append((P.HEADGEAR[gname], gname in METAL_GEAR))
     for it in look["items"]:
         layers.append((P.ITEMS[it], it in METAL_ITEMS))
-    return outline(compose(layers, pal))
+    img = compose(layers, pal)
+    if spec.get("child"):
+        img = to_child(img)
+    return outline(img)
+
+
+def to_child(img):
+    """頭はそのまま下へずらし、体を縦に詰めて子どもの背丈にする"""
+    out = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    head = img.crop((0, 0, P.W, 17))
+    out.alpha_composite(head, (0, 6))
+    body_rows = [17, 19, 20, 22, 24, 26, 28, 30, 31]
+    for i, y in enumerate(body_rows):
+        out.paste(img.crop((0, y, P.W, y + 1)), (0, 23 + i))
+    # 頭の下端と体の上端が重なるところは体を優先しない（顔を残す）
+    for x in range(P.W):
+        for y in range(17, 23):
+            if img.getpixel((x, y - 6))[3] and not out.getpixel((x, y))[3]:
+                out.putpixel((x, y), img.getpixel((x, y - 6)))
+    return out
+
+
+# 冒険者ではない人物。role：adult（住民など大人）／guard（警備隊）／child（子ども）／elder（老人）
+NPCS = [
+    dict(role="adult", g="m", name="住民", outfit="tunic", back=[], gear=[], items=[], hair="short", hair_c="#6a4a2a", o="#5a7a4a", a="#5a7a4a", t="#6a5a4a", eye="#4a3a2a", skin="fair"),
+    dict(role="adult", g="m", name="住民", outfit="vest", back=[], gear=[], items=[], hair="messy", hair_c="#2a2a30", o="#3a5a8a", a="#8a4a3a", t="#4a4a5a", eye="#3a3a5a", skin="tan"),
+    dict(role="adult", g="m", name="住民", outfit="tunic", back=[], gear=[], items=[], hair="spiky", hair_c="#c06a3a", o="#7a7a80", a="#7a7a80", t="#5a4a3a", eye="#3a6a3a", skin="light"),
+    dict(role="adult", g="f", name="住民", outfit="dress", back=[], gear=[], items=[], hair="long", hair_c="#e8c870", o="#b04a4a", a="#f2efe4", eye="#3a6ab0", skin="light"),
+    dict(role="adult", g="f", name="住民", outfit="dress", back=[], gear=[], items=[], hair="bob", hair_c="#7a4a2a", o="#3a6aa0", a="#f2efe4", eye="#5a3a2a", skin="fair"),
+    dict(role="adult", g="f", name="住民", outfit="dress", back=[], gear=[], items=[], hair="pony", hair_c="#2a2224", o="#4a7a4a", a="#e8d8a0", eye="#3a3a3a", skin="dark"),
+    dict(role="adult", g="m", name="奏者", outfit="tunic", back=[], gear=["cap"], items=["feather", "lute"], hair="messy", hair_c="#a06a3a", o="#6a3a8a", a="#f0c445", t="#3a3a4a", eye="#6a3a8a", skin="fair"),
+    dict(role="adult", g="m", name="牧師", outfit="robe", back=[], gear=[], items=[], hair="short", hair_c="#8a7a6a", o="#2a2a34", a="#f2efe4", eye="#4a4a5a", skin="fair"),
+    dict(role="guard", g="m", name="警備隊", outfit="plate", back=[], gear=["helmet"], items=["spear"], hair="short", hair_c="#5a3a2a", o="#2d56a8", a="#f0c445", t="#3a3a4a", eye="#3a3a3a", skin="tan"),
+    dict(role="guard", g="f", name="警備隊", outfit="plate", back=[], gear=[], items=["spear"], hair="pony", hair_c="#b04a3a", o="#2d56a8", a="#f0c445", t="#3a3a4a", eye="#3a6a3a", skin="fair"),
+    dict(role="child", g="m", name="子ども", outfit="tunic", back=[], gear=[], items=[], hair="spiky", hair_c="#e0b050", o="#d06a3a", a="#d06a3a", t="#4a5a8a", eye="#3a6ad0", skin="light", child=True),
+    dict(role="child", g="f", name="子ども", outfit="dress", back=[], gear=[], items=[], hair="twin", hair_c="#c05a4a", o="#e07aa0", a="#f2efe4", eye="#3a7a4a", skin="fair", child=True),
+    dict(role="child", g="m", name="子ども", outfit="vest", back=[], gear=[], items=[], hair="short", hair_c="#3a2a24", o="#4a7a4a", a="#c04a3a", t="#5a4a3a", eye="#4a3a2a", skin="tan", child=True),
+    dict(role="elder", g="m", name="老人", outfit="robe", back=[], gear=["beard"], items=["stick"], hair="short", hair_c="#e8e8e8", o="#7a5a3a", a="#a08060", eye="#4a4a4a", skin="fair"),
+    dict(role="elder", g="f", name="老人", outfit="dress", back=[], gear=[], items=["stick"], hair="bob", hair_c="#c8c8d0", o="#6a4a7a", a="#c8b8d8", eye="#4a4a5a", skin="light"),
+    dict(role="elder", g="m", name="老人", outfit="vest", back=[], gear=["glasses"], items=["stick"], hair="messy", hair_c="#b0b0b8", o="#5a5a3a", a="#8a4a3a", t="#4a4a4a", eye="#3a3a3a", skin="tan"),
+]
 
 
 def main():
@@ -222,7 +262,15 @@ def main():
     band.save(os.path.join(IMG, "bandage.png"))
     for name, grid in P.AILMENTS.items():
         outline(compose([(grid, False)], make_palette(CHARS[0]))).save(os.path.join(IMG, f"ail_{name}.png"))
-    data = {"w": P.W, "h": P.H, "cols": cols, "chars": meta}
+    nsheet = Image.new("RGBA", (P.W * len(NPCS), P.H), (0, 0, 0, 0))
+    for i, spec in enumerate(NPCS):
+        nsheet.paste(build_char(spec), (i * P.W, 0))
+    nsheet.save(os.path.join(IMG, "npcs.png"))
+    if "--preview" in sys.argv:
+        nb = nsheet.resize((nsheet.width * 5, nsheet.height * 5), Image.NEAREST)
+        bgn = Image.new("RGBA", nb.size, (120, 104, 92, 255)); bgn.alpha_composite(nb); bgn.save("/tmp/npc_preview.png")
+    data = {"w": P.W, "h": P.H, "cols": cols, "chars": meta,
+            "npcs": [{"role": n["role"], "g": n["g"], "name": n["name"]} for n in NPCS]}
     # ゲームは file:// でも動くよう JS として読み込む
     with open(os.path.join(ROOT, "js", "adv_meta.js"), "w", encoding="utf-8") as f:
         f.write("// tools/gen_sprites.py が生成（img/adventurers.png の並び順）\n")

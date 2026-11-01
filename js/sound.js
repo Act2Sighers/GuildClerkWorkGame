@@ -62,6 +62,7 @@ const SFX = (() => {
     stamp() { noise(0.09, 0.35, 'lowpass', 700); tone(110, 0.12, 'sine', 0.25, 60); },
     good() { [784, 988, 1318].forEach((f, i) => tone(f, 0.18, 'triangle', 0.08, null, i * 0.07)); },
     bad() { tone(220, 0.16, 'square', 0.05); tone(165, 0.24, 'square', 0.05, null, 0.12); },
+    deny() { tone(140, 0.09, 'square', 0.05); tone(120, 0.09, 'square', 0.05, null, 0.1); },
     coin() { tone(1975, 0.08, 'square', 0.035); tone(2637, 0.25, 'square', 0.035, null, 0.07); },
     clink() { tone(2400 + Math.random() * 400, 0.12, 'sine', 0.06); tone(3600, 0.06, 'sine', 0.025, null, 0.01); },
     soft() { tone(660, 0.06, 'triangle', 0.05, 440); },

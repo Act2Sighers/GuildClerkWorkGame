@@ -14,7 +14,7 @@ const rankIdx = r => RANKS.indexOf(r);
 const hhmm = m => { m = Math.floor(m); return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const META = window.ADV_META;
-const STATE_LABEL = { empty: '空き', reception: '受注対応待ち', departing: '出発', quest: '進行中', returned: '終了対応待ち', leaving: '退出' };
+const STATE_LABEL = { empty: '空き', reception: '受注対応待ち', departing: '出発', quest: '進行中', returned: '終了対応待ち', leaving: '退出', side: '副次業務', sidewait: '迎え待ち' };
 
 /* ---------- 画像 ---------- */
 const IMGS = {};
@@ -27,13 +27,13 @@ const S = {
   day: 1, gold: CFG.START_GOLD, shelf: makeShelf(CFG.START_STOCK), boxes: [], restock: false,
   clock: CFG.OPEN, phase: 'title', paused: false,
   slots: Array.from({ length: CFG.SLOTS }, (_, i) => ({ i, state: 'empty', party: null, until: 0, enter: false })),
-  selected: 0, hand: null, order: null, ordered: null, sheet: null, nextArrival: CFG.OPEN + 8, seq: 1, rt: 0, stats: newStats(),
+  selected: 0, hand: null, order: null, ordered: null, sheet: null, deposits: [], nextArrival: CFG.OPEN + 8, seq: 1, rt: 0, stats: newStats(),
 };
 function newStats() {
   return {
     visitors: 0, approved: 0, approveWrong: 0, rejected: 0, rejectOk: 0, rejectReason: 0, rejectWrong: 0,
     returned: 0, success: 0, fail: 0, allowances: 0, allowanceMiss: 0,
-    incomeHQ: 0, incomeOwner: 0, closedAway: 0, carriedIn: 0,
+    incomeHQ: 0, incomeOwner: 0, closedAway: 0, carriedIn: 0, sideDone: 0, sideMiss: 0,
     used: Object.fromEntries(ITEMS.map(k => [k, 0])),
   };
 }
@@ -111,7 +111,7 @@ function categoryOf(ev) {
   return pr.length === 0 ? 'fit' : pr.length >= 2 ? 'multi' : pr[0];
 }
 function genParty() {
-  const used = new Set(S.slots.filter(s => s.party).flatMap(s => s.party.members.map(m => m.gid)));
+  const used = usedAdventurers();
   const pool = [...Array(META.chars.length).keys()].filter(g => !used.has(g));
   const target = weighted(CFG.CATEGORY_WEIGHT);
   const maxH = clamp(Math.floor((CFG.CLOSE - S.clock) / 60), 1, 5);
@@ -163,7 +163,7 @@ function setLeaving(slot, lines) {
 }
 
 function freeSlot(slot) {
-  slot.state = 'empty'; slot.party = null;
+  slot.state = 'empty'; slot.party = null; slot.task = null;
   if (S.phase === 'business') {
     const soon = S.clock + rand(CFG.REFILL_GAP[0], CFG.REFILL_GAP[1]) / OPT.visit;
     if (S.nextArrival < soon) S.nextArrival = soon;
@@ -299,7 +299,7 @@ function stamp() {
   const need = requiredItems(p);
   const got = Object.fromEntries(ITEMS.map(k => [k, p.counter.filter(c => c.kind === k).length]));
   const miss = [];
-  if (ITEMS.some(k => need[k] !== got[k])) miss.push('渡す数が不適切');
+  if (ITEMS.some(k => need[k] !== got[k]) || p.counter.some(c => !ITEMS.includes(c.kind))) miss.push('渡す数が不適切');
   if (p.counter.some(c => !c.tagged)) miss.push('タグの貼り忘れ');
   p.mistakes += miss.length;
   // 1パーティへの対応がすべてミスなく終わったときだけ嬉しそうにする
@@ -348,6 +348,222 @@ function startDay() {
   SFX.open(); showScene(`${S.day}日目　営業開始`, '6:00');
 }
 
+/* ---------- 副次業務 ---------- */
+const NPC_META = META.npcs;
+function usedAdventurers() {
+  const u = new Set();
+  for (const s of S.slots) {
+    if (s.party) for (const m of s.party.members) u.add(m.gid);
+    if (s.task && s.task.req.adv != null) u.add(s.task.req.adv);
+  }
+  return u;
+}
+function usedNpcs() {
+  const u = new Set(S.deposits.map(d => d.req.npc));
+  for (const s of S.slots) if (s.task) {
+    if (s.task.req.npc != null) u.add(s.task.req.npc);
+    if (s.task.relative != null) u.add(s.task.relative);
+    if (s.task.pickup && s.task.pickup.npc != null) u.add(s.task.pickup.npc);
+  }
+  return u;
+}
+function pickNpc(role, extraExclude) {
+  const u = usedNpcs(); if (extraExclude != null) u.add(extraExclude);
+  const pool = NPC_META.map((n, i) => i).filter(i => NPC_META[i].role === role && !u.has(i));
+  return pool.length ? pick(pool) : null;
+}
+function depositsInUse() {
+  const u = new Set(S.deposits.map(d => d.item));
+  for (const s of S.slots) if (s.task && s.task.kind === 'deposit') u.add(s.task.item);
+  for (const k of S.shelf) if (isDep(k)) u.add(k.slice(4));
+  return u;
+}
+const sideCount = () => S.deposits.length + S.slots.filter(s => s.task && s.task.kind === 'deposit').length;
+// 正しく対応するためのツール
+function correctTool(t) {
+  if (t.kind === 'guide') return 'map';
+  if (t.kind === 'lost') return t.who === 'member' ? 'map' : 'phone';
+  return null;
+}
+function reqName(t) { return t.req.adv != null ? t.req.name : NPC_META[t.req.npc].name; }
+
+function spawnSide(slot) {
+  const kinds = { ...SIDE.WEIGHT };
+  if (!S.shelf.includes(null) || sideCount() >= SIDE.DEPOSIT_MAX) delete kinds.deposit;
+  const kind = weighted(kinds);
+  const base = { id: S.seq++, kind, tool: null, mapOpen: null, dial: [], mistake: false, done: false, opened: false, bubble: null };
+  let t;
+  if (kind === 'guide') {
+    const npc = pickNpc('adult'); if (npc == null) return false;
+    const mi = randi(0, MAPS.length - 1);
+    const places = MAPS[mi].places.map((p, i) => i).filter(i => MAPS[mi].places[i].type === 'place');
+    const dest = pick(places);
+    t = { ...base, req: { npc }, map: mi, dest, request: `${MAPS[mi].name}の${MAPS[mi].places[dest].n}に行きたいんです` };
+    t.say = pick(SIDE_LINES.guideArrive);
+  } else if (kind === 'lost') {
+    const who = weighted(SIDE.LOST_WHO);
+    if (who === 'member') {
+      const used = usedAdventurers();
+      const pool = [...Array(META.chars.length).keys()].filter(g => !used.has(g));
+      if (!pool.length) return false;
+      const gid = pick(pool);
+      const mi = randi(0, MAPS.length - 1), M = MAPS[mi];
+      let hint;
+      if (Math.random() < 0.5) {
+        const meet = pick(M.places.filter(p => p.type !== 'place'));
+        hint = `いつも『${meet.n}』で集合しているんです`;
+      } else hint = Math.random() < 0.4 ? `${M.name}で別れたはずなんです` : M.features[randi(0, M.features.length - 1)];
+      t = { ...base, who, req: { adv: gid, name: pick(NAMES[META.chars[gid].g]) }, map: mi, hint };
+      t.say = pick(SIDE_LINES.memberArrive);
+    } else {
+      const npc = pickNpc(who); if (npc == null) return false;
+      const relative = pickNpc('adult', npc); if (relative == null) return false;
+      let number = null;
+      if (Math.random() < SIDE.TELL_NUMBER) {
+        do { number = [0, 0, 0, 0].map(() => randi(0, GLYPHS.length - 1)); } while (number.join() === GUARD_NUMBER.join());
+      }
+      t = { ...base, who, req: { npc }, relative, number };
+      t.say = pick(who === 'child' ? SIDE_LINES.childArrive : SIDE_LINES.elderArrive);
+    }
+  } else {
+    const npc = pickNpc('adult'); if (npc == null) return false;
+    const free = Object.keys(DEPOSIT_ITEMS).filter(k => !depositsInUse().has(k));
+    if (!free.length) return false;
+    t = { ...base, stage: 1, req: { npc }, item: pick(free), stored: false };
+    t.say = pick(SIDE_LINES.depositArrive);
+  }
+  slot.task = t; slot.party = null; slot.state = 'side'; slot.enter = true;
+  t.bubble = { text: t.say, until: S.rt + 4 };
+  toast(`窓口${slot.i + 1}：${reqName(t)}がやって来ました（副次業務）`);
+  SFX.bell();
+  return true;
+}
+function spawnDeposit2(slot, d) {
+  const hk = weighted(SIDE.HINT), it = DEPOSIT_ITEMS[d.item];
+  const say = hk === 'name' ? `『${it.name}』を返してほしいんです` : hk === 'feature' ? `${it.feature}を預けていたんです` : pick(SIDE_LINES.returnNone);
+  const t = { id: S.seq++, kind: 'deposit', stage: 2, req: d.req, item: d.item, say, mistake: false, done: false, bubble: null };
+  slot.task = t; slot.party = null; slot.state = 'side'; slot.enter = true;
+  t.bubble = { text: say, until: S.rt + 4 };
+  toast(`窓口${slot.i + 1}：${reqName(t)}が預けた品を受け取りに来ました`);
+  SFX.bell();
+}
+function sideMistake(t, slot, why) {
+  if (t.mistake) return;
+  t.mistake = true; S.stats.sideMiss++;
+  clerkFace('sad', 1.4);
+  toast(`窓口${slot.i + 1}：${why}`, 'bad');
+}
+function sideSuccess(t, slot, amount, what) {
+  earn(amount, 0);
+  if (!t.mistake) clerkFace('happy', 1.6);
+  toast(`窓口${slot.i + 1}：${what}　+${amount}G（運営本部）`, 'good');
+}
+function sideFinish(slot, lines, extra) {
+  const t = slot.task; t.done = true; S.stats.sideDone++;
+  slot.state = 'leaving'; slot.until = S.rt + CFG.LEAVE_SEC + (extra || 0.6);
+  t.say = pick(lines);
+  t.bubble = { text: t.say, until: slot.until };
+}
+function openTool(tool) {
+  const slot = selSlot(), t = slot.task;
+  if (!t || slot.state !== 'side' || t.done) return;
+  t.tool = tool; t.mapOpen = null; SFX.paper();
+  if (tool === correctTool(t) && !t.opened) {
+    t.opened = true;
+    if (t.kind === 'guide') t.say = pick(SIDE_LINES.guideOpen);
+    else if (t.who === 'member') t.say = t.hint;
+    else t.say = t.number ? (t.who === 'child' ? 'おうちの番号は、これ！' : '家の番号は、これですじゃ') : pick(SIDE_LINES.numberUnknown);
+    t.bubble = { text: t.say, until: S.rt + 4 };
+  }
+}
+function closeTool() { const t = selSlot().task; if (t && !t.done) { t.tool = null; t.mapOpen = null; SFX.paper(); } }
+function openMap(i) { const t = selSlot().task; if (t && !t.done) { t.mapOpen = i; SFX.paper(); } }
+function foldMap() { const t = selSlot().task; if (t && !t.done) { t.mapOpen = null; SFX.paper(); } }
+// 線を引き終えたとき（from・to は地図内の場所の番号）
+function finishLine(from, to) {
+  const slot = selSlot(), t = slot.task;
+  if (!t || t.done || slot.state !== 'side' || t.mapOpen == null) return;
+  const M = MAPS[t.mapOpen];
+  const goal = t.kind === 'guide' ? (t.mapOpen === t.map ? t.dest : -1) : M.places.findIndex(p => p.type === 'hub');
+  const ok = t.mapOpen === t.map && M.places[from].type === 'symbol' && to === goal;
+  t.line = { map: t.mapOpen, from, to, ok };
+  if (t.kind === 'guide') {
+    if (ok) sideSuccess(t, slot, SIDE.REWARD.guide, '道案内ができました');
+    else sideMistake(t, slot, '道案内のミス（地図・シンボル・目的地のどれかが違います）');
+    sideFinish(slot, ok ? SIDE_LINES.guideOk : SIDE_LINES.guideNg, 1.2);
+  } else {
+    if (ok) sideSuccess(t, slot, SIDE.REWARD.lostMap, '仲間のいる交流所を案内できました');
+    else sideMistake(t, slot, '迷子の案内のミス（地図・シンボル・交流所のどれかが違います）');
+    sideFinish(slot, ok ? SIDE_LINES.memberOk : SIDE_LINES.memberNg, 1.2);
+  }
+  SFX.stamp();
+}
+function pressKey(g) {
+  const t = selSlot().task; if (!t || t.done || t.tool !== 'phone') return;
+  if (t.dial.length >= 4) { SFX.deny(); return; }
+  t.dial = [...t.dial, g]; SFX.click();
+}
+function clearDial() { const t = selSlot().task; if (t && !t.done) { t.dial = []; SFX.soft(); } }
+function liftReceiver() {
+  const slot = selSlot(), t = slot.task;
+  if (!t || t.done || slot.state !== 'side') return;
+  if (correctTool(t) !== 'phone' || t.dial.length < 4) { SFX.deny(); return; }
+  t.dialed = t.dial.slice(); t.dial = [];
+  t.waitLeft = rand(SIDE.WAIT_MIN[0], SIDE.WAIT_MIN[1]);
+  t.waitTotal = t.waitLeft;
+  slot.state = 'sidewait'; t.tool = null;
+  t.say = pick(t.who === 'child' ? SIDE_LINES.waitChild : SIDE_LINES.waitElder);
+  SFX.tag();
+  toast(`窓口${slot.i + 1}：電話を掛けました。迎えを待ちます`);
+}
+function pickupArrives(slot) {
+  const t = slot.task;
+  const told = t.number && t.dialed.join() === t.number.join();
+  const guard = t.dialed.join() === GUARD_NUMBER.join();
+  const ok = t.number ? told : guard;
+  if (told) t.pickup = { npc: t.relative, kind: 'family' };
+  else if (guard) t.pickup = { npc: pickNpc('guard') ?? NPC_META.findIndex(n => n.role === 'guard'), kind: 'guard' };
+  else t.pickup = { npc: pickNpc('adult', t.relative) ?? t.relative, kind: 'stranger' };
+  if (ok) sideSuccess(t, slot, SIDE.REWARD.lostPhone, '迎えが到着しました');
+  else sideMistake(t, slot, t.number && guard ? '番号を教えてもらっていたのに、警備隊を呼んでしまいました' : '違う相手が迎えに来てしまいました');
+  sideFinish(slot, guard ? SIDE_LINES.pickupGuard : ok ? SIDE_LINES.pickupOk : SIDE_LINES.pickupNg, 1.6);
+  slot.enter = true;
+  SFX.bell();
+}
+// 一時保管
+function storeDeposit() {
+  const slot = selSlot(), t = slot.task;
+  if (!t || t.kind !== 'deposit' || t.stage !== 1 || t.done) return;
+  if (!shelfPut('dep:' + t.item)) { toast('棚に空きがありません', 'bad'); return; }
+  SFX.clink();
+  let dueDay = S.day, dueAt = S.clock + rand(SIDE.DEPOSIT_GAP[0], SIDE.DEPOSIT_GAP[1]);
+  if (dueAt >= CFG.CLOSE) { dueDay = S.day + 1; dueAt = CFG.OPEN + rand(20, 240); }
+  S.deposits.push({ req: t.req, item: t.item, dueDay, dueAt });
+  t.done = true; S.stats.sideDone++;
+  slot.state = 'leaving'; slot.until = S.rt + CFG.LEAVE_SEC;
+  t.say = pick(SIDE_LINES.depositLeave); t.bubble = { text: t.say, until: slot.until };
+}
+function returnDeposit(idx) {
+  const slot = selSlot(), t = slot.task;
+  if (!t || t.kind !== 'deposit' || t.stage !== 2 || t.done) return;
+  const k = S.shelf[idx]; if (!k) return;
+  if (k === 'dep:' + t.item) {
+    S.shelf[idx] = null; SFX.clink();
+    if (!t.mistake) sideSuccess(t, slot, SIDE.REWARD.deposit, '預かり物を返しました');
+    sideFinish(slot, SIDE_LINES.returnOk);
+  } else {
+    SFX.deny();
+    sideMistake(t, slot, '違う品を返そうとしました');
+    t.say = pick(SIDE_LINES.returnWrong); t.bubble = { text: t.say, until: S.rt + 3 };
+  }
+}
+function refuseReturn() {
+  const slot = selSlot(), t = slot.task;
+  if (!t || t.kind !== 'deposit' || t.stage !== 2 || t.done) return;
+  sideMistake(t, slot, '返却を拒否しました');
+  sideFinish(slot, SIDE_LINES.returnRefused);
+}
+
 /* ---------- 早朝・深夜 ---------- */
 const PACK_OF = { 2: 'pouch', 5: 'crate_s', 10: 'crate_l' };
 const PACK_NAME = { pouch: '皮製の小包', crate_s: '小さな木箱', crate_l: '大きな木箱' };
@@ -361,6 +577,7 @@ function toMorning() {
   }
   S.order = null;
   S.arrived = arrived;
+  for (const d of S.deposits) if (d.dueDay < S.day) { d.dueDay = S.day; d.dueAt = CFG.OPEN + rand(20, 180); }
   showScene(`${S.day}日目　早朝`, arrived ? '荷物が届いています' : '');
   toast(arrived ? `${S.day}日目の朝。昨夜注文した支給品が ${arrived}箱 届いています` : `${S.day}日目の朝。届いた荷物はありません`);
 }
@@ -427,7 +644,7 @@ const SAVE_KEY = 'guild-clerk-work-v1';
 function save() {
   const slots = S.slots.map(s => (s.state === 'quest' || s.state === 'departing') ? { party: { ...s.party, bubble: null } } : null);
   try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 2, day: S.day, gold: S.gold, shelf: S.shelf, boxes: S.boxes, order: S.order, seq: S.seq, slots }));
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 2, day: S.day, gold: S.gold, shelf: S.shelf, boxes: S.boxes, order: S.order, seq: S.seq, slots, deposits: S.deposits }));
   } catch (e) { /* 保存できない環境では何もしない */ }
 }
 function loadSave() {
@@ -443,12 +660,14 @@ function loadSave() {
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* noop */ } }
 function reset() {
   Object.assign(S, { day: 1, gold: CFG.START_GOLD, shelf: makeShelf(CFG.START_STOCK), boxes: [], restock: false, order: null, ordered: null, sheet: null, hand: null, seq: 1, selected: 0, stats: newStats() });
-  for (const s of S.slots) { s.state = 'empty'; s.party = null; s.enter = false; }
+  S.deposits = [];
+  for (const s of S.slots) { s.state = 'empty'; s.party = null; s.task = null; s.enter = false; }
 }
 function applySave(d) {
   reset();
   const shelf = Array(CFG.SHELF_MAX).fill(null);
-  (d.shelf || []).forEach((k, i) => { if (i < shelf.length && ITEMS.includes(k)) shelf[i] = k; });
+  (d.shelf || []).forEach((k, i) => { if (i < shelf.length && (ITEMS.includes(k) || (isDep(k) && DEPOSIT_ITEMS[k.slice(4)]))) shelf[i] = k; });
+  S.deposits = (d.deposits || []).filter(x => DEPOSIT_ITEMS[x.item]);
   Object.assign(S, { day: d.day, gold: d.gold, shelf, boxes: (d.boxes || []).map(b => ({ ...b })), order: d.order, seq: d.seq });
   d.slots.forEach((x, i) => { if (x && S.slots[i]) { S.slots[i].state = 'quest'; S.slots[i].party = x.party; } });
 }
@@ -469,11 +688,23 @@ function update(dt) {
   if (S.phase === 'business' && S.clock <= CFG.CLOSE - 60 && S.clock >= S.nextArrival) {
     const empty = S.slots.find(s => s.state === 'empty');
     if (empty) {
-      spawnParty(empty);
+      if (!(Math.random() < SIDE.RATE && spawnSide(empty))) spawnParty(empty);
       S.nextArrival = S.clock + rand(CFG.ARRIVAL_GAP[0], CFG.ARRIVAL_GAP[1]) / OPT.visit;
     }
   }
-  if (S.phase === 'afterhours' && !S.slots.some(s => s.state === 'returned' || s.state === 'leaving')) endDay();
+  // 一時保管の2回目の訪問（22時まで。窓口が埋まっていれば空くまで待つ）
+  if (S.phase === 'business') {
+    const due = S.deposits.find(d => d.dueDay < S.day || (d.dueDay === S.day && S.clock >= d.dueAt));
+    const empty = due && S.slots.find(s => s.state === 'empty');
+    if (due && empty) { S.deposits = S.deposits.filter(d => d !== due); spawnDeposit2(empty, due); }
+  }
+  // 迷子の迎え待ち（営業終了後は2倍の速さで進む）
+  for (const s of S.slots) {
+    if (s.state !== 'sidewait') continue;
+    s.task.waitLeft -= dt * CFG.MIN_PER_SEC * (S.phase === 'afterhours' ? 2 : 1);
+    if (s.task.waitLeft <= 0) pickupArrives(s);
+  }
+  if (S.phase === 'afterhours' && !S.slots.some(s => ['returned', 'leaving', 'side', 'sidewait'].includes(s.state))) endDay();
 }
 
 /* ---------- スプライト ---------- */
@@ -513,7 +744,13 @@ function sprite(gid, status, scale, ail) {
   return c;
 }
 const AIL_TINT = { burn: 'rgba(255,110,50,0.16)', chill: 'rgba(140,200,255,0.38)', para: 'rgba(255,230,70,0.18)', poison: 'rgba(140,70,190,0.32)' };
-function itemImg(kind, cls) { const i = el('img', 'px ' + (cls || '')); i.src = `img/item_${kind}.png`; i.alt = ITEM_NAME[kind] || ''; return i; }
+const isDep = k => typeof k === 'string' && k.startsWith('dep:');
+const itemName = k => isDep(k) ? DEPOSIT_ITEMS[k.slice(4)].name : (ITEM_NAME[k] || '');
+function itemImg(kind, cls) {
+  const i = el('img', 'px ' + (cls || ''));
+  i.src = isDep(kind) ? `img/dep_${kind.slice(4)}.png` : `img/item_${kind}.png`;
+  i.alt = itemName(kind); return i;
+}
 
 /* ---------- 画面 ---------- */
 /* ハンコの押印アニメーションは、押した直後の描画でだけ付ける */
@@ -568,6 +805,7 @@ function toast(msg, kind) {
 
 const boothDom = [];
 function boothKey(s) {
+  if (s.task) return s.state + '|t' + s.task.id + '|' + bubbleText(s.task) + '|' + !!s.task.pickup;
   const p = s.party;
   let k = s.state + '|' + (p ? p.id : '') + '|' + bubbleText(p);
   if (p && s.state === 'returned') k += '|' + p.members.map(m => m.status).join(',');
@@ -581,8 +819,10 @@ function buildBooth(s) {
   const p = s.party;
   const plate = el('div', 'plate');
   plate.appendChild(el('span', 'no', `窓口${s.i + 1}`));
-  plate.appendChild(el('span', 'badge ' + (s.state === 'departing' ? 'quest' : s.state), STATE_LABEL[s.state]));
+  const st = s.task && s.state === 'leaving' ? 'leaving' : s.state;
+  plate.appendChild(el('span', 'badge ' + (st === 'departing' ? 'quest' : st), STATE_LABEL[st]));
   b.root.appendChild(plate);
+  if (s.task) return buildBoothTask(s, b);
   if (!p) { b.root.appendChild(el('div', 'empty-msg', '— 空き —')); return; }
   const q = p.quest;
   if (s.state === 'quest') {
@@ -606,6 +846,30 @@ function buildBooth(s) {
   for (const m of p.members) party.appendChild(sprite(m.gid, showStatus ? m.status : 'ok', 2, showStatus && m.status !== 'ghost' ? m.ail : null));
   b.root.appendChild(party);
   const bt = bubbleText(p);
+  if (bt) b.root.appendChild(el('div', 'bubble', bt));
+}
+function reqSprite(req, scale) {
+  if (req.adv != null) return sprite(req.adv, 'ok', scale);
+  return npcSprite(req.npc, scale);
+}
+function npcSprite(i, scale) {
+  const { w, h } = META;
+  const c = el('canvas', 'px');
+  c.width = w * scale; c.height = h * scale;
+  const x = c.getContext('2d'); x.imageSmoothingEnabled = false;
+  x.drawImage(IMGS.npcs, i * w, 0, w, h, 0, 0, w * scale, h * scale);
+  return c;
+}
+function buildBoothTask(s, b) {
+  const t = s.task;
+  b.root.appendChild(el('div', 'info', s.state === 'sidewait' ? '迎えを待っています' : t.done ? '' : '副次業務'));
+  const party = el('div', 'party');
+  if (s.enter) { party.classList.add('enter'); s.enter = false; }
+  if (s.state === 'leaving') party.classList.add('leave');
+  party.appendChild(reqSprite(t.req, 2));
+  if (t.pickup) party.appendChild(npcSprite(t.pickup.npc, 2));
+  b.root.appendChild(party);
+  const bt = bubbleText(t);
   if (bt) b.root.appendChild(el('div', 'bubble', bt));
 }
 function renderBooths() {
@@ -680,6 +944,7 @@ function questSheet(q, p) {
 function deskKeyOf() {
   const s = selSlot(); const p = s.party;
   if (S.phase === 'morning' || S.phase === 'night') return S.phase + JSON.stringify([S.restock, S.boxes, S.sheet, S.ordered, S.hand, S.gold, S.shelf]);
+  if (s.task) { const t = s.task; return S.selected + '|' + s.state + '|' + JSON.stringify([t.id, t.tool, t.mapOpen, t.dial, t.say, t.done, t.line, !!t.pickup, S.phase]); }
   let k = S.selected + '|' + s.state + '|' + (p ? p.id : '') + '|' + S.hand + '|' + S.phase;
   if (p) k += '|' + p.decision + '|' + REASONS.map(r => +!!p.checks[r.id]).join('') + '|' + p.counter.map(c => c.kind + (c.tagged ? 1 : 0)).join(',') + '|' + p.stamped;
   return k;
@@ -699,6 +964,7 @@ function renderDesk() {
   const head = el('div', 'desk-head');
   head.appendChild(el('span', '', `窓口${s.i + 1}`));
   d.appendChild(head);
+  if (s.task) return deskSide(d, s, s.task, head);
   if (!p || s.state === 'empty') {
     head.appendChild(el('span', 'sub', '空き'));
     d.appendChild(el('div', 'desk-empty', S.phase === 'business' ? 'この窓口は空いています。次のパーティを待ちましょう。' : 'この窓口は空いています。'));
@@ -772,7 +1038,7 @@ function deskReturned(d, s, p, head) {
   if (!p.counter.length) items.appendChild(el('div', 'ph', '（カウンターに品はありません）'));
   p.counter.forEach((c, i) => {
     const b = el('button', 'item');
-    b.title = ITEM_NAME[c.kind] + (c.tagged ? '（タグ済み）' : '');
+    b.title = itemName(c.kind) + (c.tagged ? '（タグ済み）' : '');
     b.appendChild(itemImg(c.kind));
     if (c.tagged) b.appendChild(itemImg('tag', 'tg'));
     b.addEventListener('click', () => clickItem(i));
@@ -950,12 +1216,190 @@ function renderHand() {
   const nn = $('#handNum'); if (nn.textContent !== num) nn.textContent = num;
 }
 
+function glyphSvg(g, size) {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 20 20'); svg.setAttribute('width', size); svg.setAttribute('height', size);
+  svg.classList.add('glyph');
+  const path = document.createElementNS(ns, 'path');
+  path.setAttribute('d', GLYPHS[g]);
+  svg.appendChild(path);
+  return svg;
+}
+function glyphRow(nums, size) {
+  const r = el('span', 'glyphs');
+  for (const g of nums) r.appendChild(glyphSvg(g, size));
+  return r;
+}
+function deskSide(d, s, t, head) {
+  head.appendChild(el('span', '', reqName(t)));
+  head.appendChild(el('span', 'sub', s.state === 'sidewait' ? '迎え待ち' : '副次業務'));
+  const req = el('div', 'side-req');
+  req.appendChild(reqSprite(t.req, 3));
+  if (t.pickup) req.appendChild(npcSprite(t.pickup.npc, 3));
+  req.appendChild(el('div', 'nm', reqName(t)));
+  d.appendChild(req);
+  const say = el('div', 'side-say');
+  if (t.request) say.appendChild(el('div', 'req', `「${t.request}」`));
+  const now = el('div', 'now', `「${t.say}」`);
+  if (t.opened && t.number && !t.done) now.appendChild(glyphRow(t.number, 26));
+  say.appendChild(now);
+  d.appendChild(say);
+  const area = el('div', 'side-tool');
+  d.appendChild(area);
+  if (t.done) { area.appendChild(el('div', 'side-msg', '対応済みです。')); if (t.line) area.appendChild(mapView(t, t.line.map, true)); return; }
+  if (s.state === 'sidewait') {
+    area.appendChild(el('div', 'side-msg', '電話を掛けました。迎えが来るまで待ちます。'));
+    area.appendChild(el('div', 'side-msg small', '待っている間は、ほかの窓口を進められます。'));
+    return;
+  }
+  if (t.kind === 'deposit') {
+    if (t.stage === 1) {
+      area.appendChild(el('div', 'side-msg', '預かる品をクリックして、棚に収めます。'));
+      const b = el('button', 'item dep-item');
+      b.appendChild(itemImg('dep:' + t.item));
+      b.addEventListener('click', storeDeposit);
+      area.appendChild(b);
+    } else {
+      area.appendChild(el('div', 'side-msg', '棚から返す品を選んでクリックします。'));
+      const rf = el('button', 'btn reject refuse', '返却を拒否する');
+      rf.addEventListener('click', refuseReturn);
+      area.appendChild(rf);
+    }
+    return;
+  }
+  if (!t.tool) {
+    area.appendChild(el('div', 'side-msg', '使うツールを選びます。'));
+    const board = el('div', 'toolboard');
+    for (const tool of ['map', 'phone']) {
+      const b = el('button', 'toolbtn ' + tool);
+      b.appendChild(el('span', 'ticon ' + tool));
+      b.appendChild(el('span', '', TOOL_NAME[tool]));
+      b.addEventListener('click', () => openTool(tool));
+      board.appendChild(b);
+    }
+    area.appendChild(board);
+    return;
+  }
+  const bar = el('div', 'toolbar');
+  bar.appendChild(el('span', '', TOOL_NAME[t.tool]));
+  if (t.tool === 'map' && t.mapOpen != null) {
+    bar.appendChild(el('span', 'sub', MAPS[t.mapOpen].name));
+    const f = el('button', 'btn small', '地図を畳む'); f.addEventListener('click', foldMap); bar.appendChild(f);
+  }
+  const back = el('button', 'btn small', 'ツールを戻す'); back.addEventListener('click', closeTool); bar.appendChild(back);
+  area.appendChild(bar);
+  if (t.tool === 'map') {
+    if (t.mapOpen == null) {
+      const g = el('div', 'mapgrid');
+      MAPS.forEach((M, i) => {
+        const b = el('button', 'mapcard ' + M.theme);
+        b.appendChild(el('span', '', M.name));
+        b.addEventListener('click', () => openMap(i));
+        g.appendChild(b);
+      });
+      area.appendChild(g);
+    } else area.appendChild(mapView(t, t.mapOpen, false));
+  } else area.appendChild(phoneView(t));
+}
+const THEME_DECOR = {
+  city: '<rect x="0" y="0" width="100" height="100" fill="#efe2c2"/>',
+  port: '<rect x="0" y="0" width="100" height="100" fill="#efe2c2"/><path d="M0 78 Q30 72 55 80 T100 76 V100 H0 Z" fill="#8cc0dc"/><path d="M8 90 l4 -3 l4 3 M70 92 l4 -3 l4 3" stroke="#3a6a8a" stroke-width=".6" fill="none"/>',
+  academy: '<rect x="0" y="0" width="100" height="100" fill="#ece0cc"/><circle cx="88" cy="56" r="9" fill="#cfe6c0"/>',
+  craft: '<rect x="0" y="0" width="100" height="100" fill="#e6d8c0"/><circle cx="12" cy="88" r="4" fill="#bfae94"/><circle cx="90" cy="88" r="3" fill="#bfae94"/>',
+  farm: '<rect x="0" y="0" width="100" height="100" fill="#e9e4b8"/><path d="M60 50 H100 V100 H60 Z" fill="#e2cf7a"/><path d="M60 58 H100 M60 66 H100 M60 74 H100 M60 82 H100 M60 90 H100" stroke="#c8b05a" stroke-width=".6"/>',
+  forest: '<rect x="0" y="0" width="100" height="100" fill="#d8e6c4"/>' + [[8, 40], [34, 12], [68, 44], [92, 46], [40, 96], [8, 72], [70, 14], [92, 92]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="5" fill="#9cc480"/>`).join(''),
+};
+function mapView(t, mi, readonly) {
+  const M = MAPS[mi];
+  const wrap = el('div', 'mapview ' + M.theme);
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 100 100'); svg.setAttribute('preserveAspectRatio', 'none');
+  svg.classList.add('mapbg');
+  const sym = M.places.findIndex(p => p.type === 'symbol');
+  let roads = '';
+  M.places.forEach((p, i) => { if (i !== sym) roads += `<line x1="${M.places[sym].x}" y1="${M.places[sym].y}" x2="${p.x}" y2="${p.y}" stroke="#c8b48a" stroke-width="2.2"/>`; });
+  svg.innerHTML = THEME_DECOR[M.theme] + roads;
+  wrap.appendChild(svg);
+  const lineSvg = document.createElementNS(ns, 'svg');
+  lineSvg.classList.add('mapline');
+  wrap.appendChild(lineSvg);
+  const drawLine = (x1, y1, x2, y2, cls) => {
+    const l = document.createElementNS(ns, 'line');
+    l.setAttribute('x1', x1); l.setAttribute('y1', y1); l.setAttribute('x2', x2); l.setAttribute('y2', y2);
+    l.setAttribute('class', cls); lineSvg.appendChild(l); return l;
+  };
+  const W = 556, H = 222;
+  const pos = i => [M.places[i].x / 100 * W, M.places[i].y / 100 * H];
+  M.places.forEach((p, i) => {
+    const n = el('div', 'mplace');
+    n.dataset.i = i;
+    n.style.left = p.x + '%'; n.style.top = p.y + '%';
+    n.appendChild(el('span', 'mdot'));
+    n.appendChild(el('span', 'mname', p.n));
+    wrap.appendChild(n);
+  });
+  if (t.line && t.line.map === mi) { const a = pos(t.line.from), b = pos(t.line.to); drawLine(a[0], a[1], b[0], b[1], 'done ' + (t.line.ok ? 'ok' : 'ng')); }
+  if (readonly) return wrap;
+  let drag = null;
+  wrap.addEventListener('pointerdown', e => {
+    const n = e.target.closest('.mplace'); if (!n) return;
+    if (correctTool(t) !== 'map') { SFX.deny(); return; }
+    e.preventDefault();
+    const from = +n.dataset.i, [x, y] = pos(from);
+    drag = { from, line: drawLine(x, y, x, y, 'live') };
+    try { wrap.setPointerCapture(e.pointerId); } catch (_) { /* noop */ }
+  });
+  wrap.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const r = wrap.getBoundingClientRect();
+    drag.line.setAttribute('x2', (e.clientX - r.left) / scale); drag.line.setAttribute('y2', (e.clientY - r.top) / scale);
+  });
+  const end = e => {
+    if (!drag) return;
+    const d0 = drag; drag = null;
+    const hit = document.elementFromPoint(e.clientX, e.clientY);
+    const n = hit && hit.closest && hit.closest('.mplace');
+    d0.line.remove();
+    if (n && wrap.contains(n) && +n.dataset.i !== d0.from) finishLine(d0.from, +n.dataset.i);
+  };
+  wrap.addEventListener('pointerup', end);
+  wrap.addEventListener('pointercancel', () => { if (drag) { drag.line.remove(); drag = null; } });
+  return wrap;
+}
+function phoneView(t) {
+  const ph = el('div', 'phone');
+  const disp = el('div', 'pdisplay');
+  for (let i = 0; i < 4; i++) {
+    const c = el('span', 'pdigit');
+    if (t.dial[i] != null) c.appendChild(glyphSvg(t.dial[i], 26));
+    disp.appendChild(c);
+  }
+  ph.appendChild(disp);
+  const pad = el('div', 'ppad');
+  GLYPHS.forEach((_, g) => {
+    const b = el('button', 'pkey'); b.appendChild(glyphSvg(g, 28));
+    b.addEventListener('click', () => pressKey(g));
+    pad.appendChild(b);
+  });
+  ph.appendChild(pad);
+  const side = el('div', 'pside');
+  const clr = el('button', 'btn small pclear', '取消（打ち直す）'); clr.addEventListener('click', clearDial); side.appendChild(clr);
+  const plate = el('div', 'pguard'); plate.appendChild(el('span', '', '警備隊')); plate.appendChild(glyphRow(GUARD_NUMBER, 20));
+  side.appendChild(plate);
+  const rcv = el('button', 'receiver', '受話器を取る'); rcv.addEventListener('click', liftReceiver); side.appendChild(rcv);
+  ph.appendChild(side);
+  return ph;
+}
+
 let shelfKey = '';
 function renderShelf() {
   const s = selSlot();
-  const can = busy() && s.state === 'returned' && s.party && !s.party.stamped;
+  const giving = busy() && s.state === 'side' && s.task && s.task.kind === 'deposit' && s.task.stage === 2 && !s.task.done;
+  const can = busy() && ((s.state === 'returned' && s.party && !s.party.stamped) || giving);
   const drag = S.phase === 'morning' || S.phase === 'night';
-  const k = S.shelf.join(',') + '|' + can + '|' + S.phase;
+  const k = S.shelf.join(',') + '|' + can + '|' + giving + '|' + S.phase;
   if (k === shelfKey) return;
   shelfKey = k;
   const sh = $('#shelf'); sh.innerHTML = '';
@@ -965,14 +1409,14 @@ function renderShelf() {
     const cell = el('div', 'scell' + (kind ? '' : ' empty'));
     if (kind) {
       const im = itemImg(kind);
-      im.title = ITEM_NAME[kind];
+      im.title = itemName(kind);
       if (drag) {
         im.draggable = true;
         im.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', String(i)); e.dataTransfer.effectAllowed = 'move'; cell.classList.add('dragging'); });
         im.addEventListener('dragend', () => cell.classList.remove('dragging'));
       } else im.draggable = false;
       cell.appendChild(im);
-      if (can) cell.addEventListener('click', () => takeItem(i));
+      if (can) cell.addEventListener('click', () => giving ? returnDeposit(i) : takeItem(i));
     }
     if (drag) {
       cell.addEventListener('dragover', e => { e.preventDefault(); cell.classList.add('over'); });
@@ -983,7 +1427,7 @@ function renderShelf() {
   });
   sh.appendChild(g);
   const note = drag ? 'ドラッグで並べ替えられます。'
-    : can ? '品をクリックしてカウンターに出します。' : '帰還したパーティの窓口を選ぶと、ここから品を出せます。';
+    : giving ? '返す品をクリックします。' : can ? '品をクリックしてカウンターに出します。' : '帰還したパーティの窓口を選ぶと、ここから品を出せます。';
   sh.appendChild(el('div', 'shelf-note', note));
 }
 
@@ -1029,6 +1473,9 @@ function showReport() {
     ['翌日へ持ち越し', carried + '組'],
     ['手当の対応', st.allowances + '件'],
     ['手当のミス', st.allowanceMiss + '件', st.allowanceMiss],
+    ['副次業務の対応', st.sideDone + '件'],
+    ['副次業務のミス', st.sideMiss + '件', st.sideMiss],
+    ['預かり中の品', S.deposits.length + '件'],
     ...ITEMS.map(k => ['使った' + ITEM_NAME[k], st.used[k] + '個']),
     ['h', '収入と在庫'],
     ['運営本部から', st.incomeHQ + 'G'],
@@ -1064,6 +1511,7 @@ function affinitySvg() {
   </svg>`;
 }
 function buildRules() {
+  setTimeout(() => { const r = document.querySelector('.rglyph'); if (r && !r.firstChild) r.appendChild(glyphRow(GUARD_NUMBER, 22)); });
   const strong = {};
   for (const j of JOBS) (strong[JOB_STRONG[j]] = strong[JOB_STRONG[j]] || []).push(j);
   const envBy = {};
@@ -1119,6 +1567,22 @@ function buildRules() {
     <li>書類にハンコを押すと、パーティがカウンターの品を受け取る。</li>
   </ul>
   <p>渡す数の誤り（品の種類違い・在庫切れも含む）と、タグの貼り忘れは、それぞれ1件のミスになり報酬が減ります。</p>
+  <h3>副次業務</h3>
+  <p>パーティ以外の依頼です。窓口を1つ使います。まずツールを選んで開きます（違うツールを開いてもミスにはなりませんが、作業を終えることはできません）。
+  ミスは1件の副次業務につき1回までです。正しく対応できると、運営本部から報酬が出ます。</p>
+  <h4>道案内（ツール：地図）</h4>
+  <p>「○○の△△に行きたい」の○○の地図を開き、地図の<b>シンボル</b>から△△へ、ドラッグで線を引きます。<br>
+  シンボルは、各地図に1つだけある<b>${SYMBOL_KINDS.join('・')}</b>です。</p>
+  <h4>迷子（ツール：子ども・老人は電話、はぐれた冒険者は地図）</h4>
+  <p><b>子ども・老人</b>：電話を開くと番号を教えてくれることがあります。教えてくれたらその番号、教えてくれなかったら<b>警備隊の番号</b>を押して、受話器を取ります（受話器を取る前なら打ち直せます）。
+  迎えが来るまで30分〜1時間待ち、迎えが来たときに結果が出ます。</p>
+  <p>警備隊の番号　<span class="rglyph"></span></p>
+  <p><b>はぐれた冒険者</b>：地図を開くと、普段の集合場所か、仲間のいそうな場所の手がかりを話します。その地図の<b>シンボル</b>から<b>交流所</b>へ線を引きます。<br>
+  交流所は、各地図に1つだけある<b>${HUB_KINDS.join('・')}</b>です。</p>
+  <h4>一時保管（ツールなし）</h4>
+  <p>1回目の訪問では、預かる品をクリックして棚に収めます。同じ人がしばらく後（翌日のこともあります）にまた来るので、そのとき棚から預かった品をクリックして返します。
+  違う品を選ぶとミスになり、選び直しになります。返せない場合は「返却を拒否する」で終えられますが、ミスになります。<br>
+  預かった品を手当でパーティに渡してしまうと、手当のミスになり、返す品もなくなります。</p>
   <h3>支給品の注文（深夜）と品出し</h3>
   <p>注文書の各品の枠に、「2」「5」「10」のどれかのハンコを1回だけ押します（空欄は0個）。押し間違えたら、注文書を捨てて書き直します。<br>
   封筒に入れると道具屋へ送られ、その場で代金を所持金から払います。所持金が足りないときは送れません。</p>
@@ -1235,7 +1699,7 @@ function frame(t) {
   requestAnimationFrame(frame);
 }
 
-Promise.all([loadImg('adv', 'img/adventurers.png'), loadImg('bandage', 'img/bandage.png'),
+Promise.all([loadImg('adv', 'img/adventurers.png'), loadImg('npcs', 'img/npcs.png'), loadImg('bandage', 'img/bandage.png'),
   ...AILMENTS.map(a => loadImg('ail_' + a, `img/ail_${a}.png`)),
   ...CLERK_FACES.map(f => loadImg('clerk_' + f, CLERK_DIR + 'clerk_' + f + '.png'))]).then(() => {
   setup();
@@ -1243,5 +1707,5 @@ Promise.all([loadImg('adv', 'img/adventurers.png'), loadImg('bandage', 'img/band
 });
 
 // 動作確認用（ブラウザのコンソールから参照できるようにしておく）
-window.__guild = { S, evaluate, update, save, loadSave, attrDanger, ailCandidates, requiredItems, externalAttr, genParty, categoryOf };
+window.__guild = { S, spawnSide, finishLine, correctTool, evaluate, update, save, loadSave, attrDanger, ailCandidates, requiredItems, externalAttr, genParty, categoryOf };
 })();
