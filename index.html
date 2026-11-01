@@ -74,9 +74,26 @@
 
   <div id="pauseOv" class="overlay" hidden>
     <div class="panel pause-panel">
-      <h2>一時停止中</h2>
-      <p>時間は止まっています。</p>
-      <button class="btn primary" id="btnResume">再開する <small>P</small></button>
+      <div id="pauseMain">
+        <h2>一時停止中</h2>
+        <p>時間は止まっています。</p>
+        <button class="btn primary" id="btnResume">再開する <small>P</small></button>
+        <button class="btn secondary" id="btnOptions">オプション</button>
+      </div>
+      <div id="optBox" hidden>
+        <h2>オプション</h2>
+        <h3 class="opt-h">デバッグ</h3>
+        <div class="opt-row">
+          <span class="opt-k">訪問頻度</span>
+          <button class="btn small" id="optVisitDown">－</button>
+          <b id="optVisit">×1.0</b>
+          <button class="btn small" id="optVisitUp">＋</button>
+          <button class="btn small" id="optVisitReset">標準</button>
+        </div>
+        <p class="opt-note" id="optVisitNote"></p>
+        <p class="opt-note">数値が大きいほど、パーティがよく来ます（×0.2〜×2.0）。<br>設定はこのブラウザに保存されます。</p>
+        <button class="btn primary" id="btnOptBack">戻る</button>
+      </div>
     </div>
   </div>
 

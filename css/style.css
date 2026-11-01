@@ -456,3 +456,24 @@ button:focus-visible { outline: 3px solid var(--sel); outline-offset: 2px; }
 .rules-panel h4 { margin: 8px 0 2px; font-size: 15px; font-weight: normal; color: #8a4a1e; }
 .ricon { width: 24px; height: 24px; vertical-align: middle; }
 .rules-panel td { font-size: 13px; }
+
+/* ---------- 信仰・属性の色、規定集の整形、オプション ---------- */
+.abadge { display: inline-block; padding: 0 5px; font-size: 14px; line-height: 1.35; border: 2px solid #1c110b; text-shadow: none; }
+.abadge.none { background: #d8ccb4; color: #2a1c14; }
+.member .fa { display: flex; align-items: center; gap: 4px; margin-top: 3px; text-shadow: none; }
+.member .fa .fl { font-size: 11px; color: #e8dcc0; text-shadow: 0 2px 0 #1c110b; }
+.qr .v .abadge { font-size: 13px; padding: 0 6px; }
+.rules-panel { width: 900px; }
+.rules-panel p, .rules-panel li { text-wrap: pretty; line-break: strict; }
+.rules-panel .small { font-size: 13px; color: var(--ink-soft); }
+.rules-panel table { width: auto; }
+.rules-panel .attr-table td:first-child { text-align: center; }
+.rules-panel .ail-table td { white-space: nowrap; }
+.rules-panel .aff { display: block; margin: 4px auto 0; font-family: inherit; }
+.pause-panel { width: 440px; }
+.btn.secondary { display: block; margin: 10px auto 0; min-width: 220px; font-size: 15px; padding: 6px 18px; }
+.opt-h { margin: 6px 0 8px; font-size: 16px; font-weight: normal; text-align: left; border-left: 6px solid #8a4a1e; padding-left: 8px; }
+.opt-row { display: flex; align-items: center; gap: 8px; justify-content: center; }
+.opt-row .opt-k { margin-right: 6px; font-size: 16px; }
+.opt-row b { font-weight: normal; font-size: 22px; min-width: 64px; text-align: center; }
+.opt-note { font-size: 13px; color: var(--ink-soft); margin: 6px 0 0; }

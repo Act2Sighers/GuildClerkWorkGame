@@ -165,7 +165,7 @@ function setLeaving(slot, lines) {
 function freeSlot(slot) {
   slot.state = 'empty'; slot.party = null;
   if (S.phase === 'business') {
-    const soon = S.clock + rand(CFG.REFILL_GAP[0], CFG.REFILL_GAP[1]);
+    const soon = S.clock + rand(CFG.REFILL_GAP[0], CFG.REFILL_GAP[1]) / OPT.visit;
     if (S.nextArrival < soon) S.nextArrival = soon;
   }
 }
@@ -193,9 +193,9 @@ function approve(slot) {
     p.outcome = 'fail';
     p.returnAt = S.clock + Math.max(10, Math.round(p.quest.hours * 60 * rand(CFG.WIPE_RETURN[0], CFG.WIPE_RETURN[1])));
   }
-  // 状態異常：生存者は怪我と同じ確率で、候補から等しい確率で1つ
+  // 状態異常：生存者は怪我の半分ほどの確率で、候補から等しい確率で1つ
   const cands = ailCandidates(p);
-  const rate = probs.length === 0 ? CFG.HURT_RATE_FIT : CFG.HURT_RATE_UNFIT;
+  const rate = probs.length === 0 ? CFG.AIL_RATE_FIT : CFG.AIL_RATE_UNFIT;
   for (const m of p.members) m.ail = (m.status !== 'ghost' && cands.length && Math.random() < rate) ? pick(cands) : null;
   say(p, LINES.approve, CFG.DEPART_SEC);
   slot.state = 'departing'; slot.until = S.rt + CFG.DEPART_SEC;
@@ -470,7 +470,7 @@ function update(dt) {
     const empty = S.slots.find(s => s.state === 'empty');
     if (empty) {
       spawnParty(empty);
-      S.nextArrival = S.clock + rand(CFG.ARRIVAL_GAP[0], CFG.ARRIVAL_GAP[1]);
+      S.nextArrival = S.clock + rand(CFG.ARRIVAL_GAP[0], CFG.ARRIVAL_GAP[1]) / OPT.visit;
     }
   }
   if (S.phase === 'afterhours' && !S.slots.some(s => s.state === 'returned' || s.state === 'leaving')) endDay();
@@ -622,6 +622,12 @@ function renderBooths() {
 }
 
 let deskKey = '', deskBar = null;
+function attrBadge(text, attr) {
+  const b = el('span', 'abadge', text);
+  const c = ATTR_COLOR[attr];
+  if (c) { b.style.background = c[0]; b.style.color = c[1]; } else b.classList.add('none');
+  return b;
+}
 function memberCard(m, status, cls, ail) {
   const c = el('div', 'member ' + (cls || ''));
   c.appendChild(sprite(m.gid, status, 3, ail));
@@ -631,7 +637,12 @@ function memberCard(m, status, cls, ail) {
   jb.appendChild(el('span', '', m.job));
   jb.appendChild(el('span', 'rank ' + m.rank, m.rank));
   meta.appendChild(jb);
-  if (m.faith) meta.appendChild(el('div', 'fa', '信仰：' + m.faith));
+  if (m.faith) {
+    const fa = el('div', 'fa');
+    fa.appendChild(el('span', 'fl', '信仰'));
+    fa.appendChild(attrBadge(m.faith, FAITH_ATTR[m.faith]));
+    meta.appendChild(fa);
+  }
   c.appendChild(meta);
   return c;
 }
@@ -648,7 +659,9 @@ function questSheet(q, p) {
     b.appendChild(el('div', 'qbh', title));
     for (const [k, v, strong] of rows) {
       const r = el('div', 'qr' + (strong ? ' st' : ''));
-      r.appendChild(el('span', 'k', k)); r.appendChild(el('span', 'v', v));
+      r.appendChild(el('span', 'k', k));
+      if (k === '属性') { const v2 = el('span', 'v'); v2.appendChild(attrBadge(v, v)); r.appendChild(v2); }
+      else r.appendChild(el('span', 'v', v));
       b.appendChild(r);
     }
     sh.appendChild(b);
@@ -1036,6 +1049,20 @@ function showReport() {
   $('#reportOv').hidden = false;
 }
 
+function affinitySvg() {
+  const node = (x, y, a) => `<g><rect x="${x}" y="${y}" width="96" height="40" rx="6" fill="${ATTR_COLOR[a][0]}" stroke="#1c110b" stroke-width="3"/>
+    <text x="${x + 48}" y="${y + 27}" text-anchor="middle" font-size="20" fill="${ATTR_COLOR[a][1]}">${a}</text></g>`;
+  const arrow = (x1, y1, x2, y2) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#2a1c14" stroke-width="2.5" marker-end="url(#ah)"/>`;
+  return `<svg class="aff" viewBox="0 0 640 318" width="640" height="318" role="img" aria-label="属性相性の図">
+    <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2a1c14"/></marker></defs>
+    ${arrow(116, 132, 252, 82)}${arrow(116, 148, 252, 202)}
+    ${arrow(348, 68, 484, 26)}${arrow(348, 82, 484, 134)}
+    ${arrow(348, 198, 484, 146)}${arrow(348, 212, 484, 254)}
+    <path d="M580,20 H612 M580,140 H612 M580,260 H612 M612,20 V290 H66 V166" fill="none" stroke="#6a5444" stroke-width="2.5" stroke-dasharray="7 5" marker-end="url(#ah)"/>
+    ${node(20, 120, '水')}${node(252, 55, '火')}${node(252, 185, '地')}${node(484, 0, '氷')}${node(484, 120, '草')}${node(484, 240, '雷')}
+    <text x="340" y="312" text-anchor="middle" font-size="15" fill="#2a1c14">氷・草・雷は、いずれも水に有利</text>
+  </svg>`;
+}
 function buildRules() {
   const strong = {};
   for (const j of JOBS) (strong[JOB_STRONG[j]] = strong[JOB_STRONG[j]] || []).push(j);
@@ -1045,58 +1072,62 @@ function buildRules() {
   const ailEnv = a => Object.keys(ENVS).filter(e => ENVS[e].ail.includes(a)).join('・');
   const ailAttr = a => Object.keys(ATTR_AIL).find(k => ATTR_AIL[k] === a);
   const icon = k => `<img class="px ricon" src="img/item_${k}.png" alt="">`;
+  const chip = a => `<span class="abadge" style="background:${ATTR_COLOR[a][0]};color:${ATTR_COLOR[a][1]}">${a}</span>`;
   $('#rulesBody').innerHTML = `
   <h3>受注の判断</h3>
-  <p>次の3つのどれにも当たらなければ認可します。当たる場合は、当てはまる理由を<b>すべて</b>選んで却下します（所要時間は判断に関係ありません）。</p>
+  <p>次の3つのどれにも当たらなければ認可します。当たる場合は、当てはまる理由を<b>すべて</b>選んで却下します。所要時間は判断に関係ありません。</p>
   <h4>構成上の危険</h4>
   <table><tr><th>概要</th><th>得意な職業</th></tr>
   ${QUEST_TYPES.map(t => `<tr><td>${t}</td><td>${strong[t].join('・')}</td></tr>`).join('')}</table>
-  <p>冒険者ランクと難易度は低い順に C → B → A → S。次のどちらも満たさない場合は構成上の危険です。</p>
+  <p>冒険者ランクと難易度は、低い順に C → B → A → S。<br>次のどちらも満たさない場合は、構成上の危険です。</p>
   <ol>
-    <li>「難易度以上のランク」で、かつ「概要が得意な職業」のメンバーが<b>1人以上</b>いる</li>
-    <li>「難易度以上のランク」か「概要が得意な職業」の<b>どちらかを満たす</b>メンバーが<b>3人以上</b>いる</li>
+    <li>「難易度以上のランク」で、かつ「概要が得意な職業」のメンバーが<b>1人以上</b>いる。</li>
+    <li>「難易度以上のランク」か「概要が得意な職業」の、<b>どちらかを満たす</b>メンバーが<b>3人以上</b>いる。</li>
   </ol>
   <h4>人員不足</h4>
   <p>A級を2人以下、S級を3人以下で受ける場合。</p>
   <h4>属性の危険</h4>
-  <p>クエストの<b>外部属性</b>は、概要が討伐なら「魔物」欄の<b>属性</b>、探索・護衛なら「場所」欄の<b>環境</b>で決まります（外部属性がないこともあります）。
-  冒険者の<b>内部属性</b>は<b>信仰</b>で決まります。</p>
-  <table><tr><th>属性</th><th>信仰</th><th>環境</th></tr>
-  ${ATTRS.map(a => `<tr><td>${a}</td><td>${faithBy(a)}</td><td>${envBy[a].join('・')}</td></tr>`).join('')}
-  <tr><td>なし</td><td>物神・無信仰</td><td>${envBy['なし'].join('・')}</td></tr></table>
-  <p>属性相性（左が右に有利）：火→草→水→火　／　火→氷→水→火　／　水→地→草→水　／　水→地→雷→水<br>風・光・闇には属性相性がありません。</p>
+  <p>クエストの<b>外部属性</b>は、概要が討伐なら「魔物」欄の<b>属性</b>、探索・護衛なら「場所」欄の<b>環境</b>で決まります。<br>外部属性がないこともあります。
+  冒険者の<b>内部属性</b>は、<b>信仰</b>で決まります。</p>
+  <table class="attr-table"><tr><th>属性</th><th>信仰</th><th>環境</th></tr>
+  ${ATTRS.map(a => `<tr><td>${chip(a)}</td><td>${faithBy(a)}</td><td>${envBy[a].join('・')}</td></tr>`).join('')}</table>
+  <p class="small">属性を持たないもの　信仰：物神・無信仰　／　環境：${envBy['なし'].join('・')}</p>
+  <p>属性相性（矢印の根元が、矢印の先に有利）</p>
+  ${affinitySvg()}
+  <p class="small">風・光・闇には、属性相性がありません。</p>
   <ul>
-    <li>外部属性が<b>火・水・雷・氷・地・草</b>：外部属性に<b>有利</b>な内部属性の人数が、<b>不利</b>な内部属性の人数より<b>多く</b>なければ属性の危険（同数も危険）</li>
-    <li>外部属性が<b>光</b>：内部属性が闇の冒険者が1人もいなければ属性の危険</li>
-    <li>外部属性が<b>闇</b>：内部属性が光の冒険者が1人もいなければ属性の危険</li>
-    <li>外部属性が<b>風</b>：冒険者どうしの内部属性の間に属性相性が1組でもあれば属性の危険</li>
+    <li>外部属性が<b>火・水・雷・氷・地・草</b>のとき：<br>外部属性に<b>有利</b>な内部属性の人数が、<b>不利</b>な内部属性の人数より<b>多く</b>なければ、属性の危険（同数も危険）。</li>
+    <li>外部属性が<b>光</b>のとき：内部属性が闇の冒険者が1人もいなければ、属性の危険。</li>
+    <li>外部属性が<b>闇</b>のとき：内部属性が光の冒険者が1人もいなければ、属性の危険。</li>
+    <li>外部属性が<b>風</b>のとき：冒険者どうしの内部属性の間に、属性相性が1組でもあれば属性の危険。</li>
   </ul>
   <h3>クエスト後手当</h3>
   <ul>
-    <li>包帯を巻いている（負傷した）メンバー1人につき ${icon('gel')}<b>回復ジェル</b> 1つ</li>
-    <li>幽霊になったメンバー1人につき ${icon('elixir')}<b>霊薬</b> 1つ（幽霊は状態異常に掛かりません）</li>
-    <li>状態異常1つにつき、対応する品を1つ（負傷と同時に掛かっていることもあります）</li>
+    <li>包帯を巻いている（負傷した）メンバー1人につき、${icon('gel')}<b>回復ジェル</b>を1つ。</li>
+    <li>幽霊になったメンバー1人につき、${icon('elixir')}<b>霊薬</b>を1つ（幽霊は状態異常に掛かりません）。</li>
+    <li>状態異常1つにつき、対応する品を1つ（負傷と同時に掛かっていることもあります）。</li>
   </ul>
-  <table><tr><th>状態異常</th><th>見た目</th><th>渡す品</th><th>掛かる可能性がある場所・魔物</th></tr>
-    <tr><td>火傷</td><td>頭の上の小さな炎、焦げ跡</td><td>${icon('whale')}クジラ酒</td><td>環境：${ailEnv('burn')}／魔物の属性：${ailAttr('burn')}</td></tr>
-    <tr><td>凍え</td><td>青白い顔色、つらら</td><td>${icon('candy')}陽飴</td><td>環境：${ailEnv('chill')}／魔物の属性：${ailAttr('chill')}</td></tr>
-    <tr><td>麻痺</td><td>体の両脇の稲妻、震え</td><td>${icon('bband')}黒包帯</td><td>環境：${ailEnv('para')}／魔物の属性：${ailAttr('para')}</td></tr>
-    <tr><td>毒</td><td>紫の顔色、頭上の泡</td><td>${icon('neut')}中和剤</td><td>環境：${ailEnv('poison')}／魔物の属性：${ailAttr('poison')}</td></tr>
+  <table class="ail-table"><tr><th>状態異常</th><th>見た目</th><th>渡す品</th><th>掛かる可能性がある環境</th><th>魔物の属性</th></tr>
+    <tr><td>火傷</td><td>頭上の炎、焦げ跡</td><td>${icon('whale')}クジラ酒</td><td>${ailEnv('burn')}</td><td>${chip(ailAttr('burn'))}</td></tr>
+    <tr><td>凍え</td><td>青白い顔色、つらら</td><td>${icon('candy')}陽飴</td><td>${ailEnv('chill')}</td><td>${chip(ailAttr('chill'))}</td></tr>
+    <tr><td>麻痺</td><td>両脇の稲妻、震え</td><td>${icon('bband')}黒包帯</td><td>${ailEnv('para')}</td><td>${chip(ailAttr('para'))}</td></tr>
+    <tr><td>毒</td><td>紫の顔色、頭上の泡</td><td>${icon('neut')}中和剤</td><td>${ailEnv('poison')}</td><td>${chip(ailAttr('poison'))}</td></tr>
   </table>
-  <p>外部属性が風のクエストで属性の危険があったまま出発した場合は、内部属性の属性相性の有利側の属性（火・氷・雷・草）に応じた状態異常にも掛かることがあります。</p>
+  <p class="small">外部属性が風のクエストに属性の危険があるまま出発した場合は、内部属性の属性相性の有利側（火・氷・雷・草）に応じた状態異常にも掛かることがあります。</p>
   <ul>
-    <li>カウンターに出した品すべてに <b>ギルド支給品のタグ</b> を貼る</li>
-    <li>書類にハンコを押すと、パーティがカウンターの品を受け取る</li>
+    <li>カウンターに出した品すべてに、<b>ギルド支給品のタグ</b>を貼る。</li>
+    <li>書類にハンコを押すと、パーティがカウンターの品を受け取る。</li>
   </ul>
-  <p>渡す数の誤り（品の種類違い・在庫切れも含む）とタグの貼り忘れは、それぞれ1件のミスになり、報酬が減ります。</p>
+  <p>渡す数の誤り（品の種類違い・在庫切れも含む）と、タグの貼り忘れは、それぞれ1件のミスになり報酬が減ります。</p>
   <h3>支給品の注文（深夜）と品出し</h3>
-  <p>注文書の各品の枠に「2」「5」「10」のどれかのハンコを1回だけ押します（空欄は0個）。押し間違えたら注文書を捨てて書き直します。
+  <p>注文書の各品の枠に、「2」「5」「10」のどれかのハンコを1回だけ押します（空欄は0個）。押し間違えたら、注文書を捨てて書き直します。<br>
   封筒に入れると道具屋へ送られ、その場で代金を所持金から払います。所持金が足りないときは送れません。</p>
-  <p>品は品ごとに1箱で翌日の早朝に届き、<b>保管中の箱</b>になります。早朝か深夜に「品出し」で箱を開け、中身を棚に並べます。
+  <p>品は品ごとに1箱で翌日の早朝に届き、<b>保管中の箱</b>になります。早朝か深夜に「品出し」で箱を開け、中身を棚に並べます。<br>
   棚は全部で${CFG.SHELF_MAX}個まで、保管できる箱は大きさを問わず${CFG.BOX_MAX}個までです。注文で届く箱を加えると${CFG.BOX_MAX}個を超える場合は送れません。</p>
-  <p>単価：${ITEMS.map(k => `${ITEM_NAME[k]} ${CFG.PRICE[k]}G`).join('・')}</p>
+  <p>単価　${ITEMS.map(k => `${ITEM_NAME[k]} ${CFG.PRICE[k]}G`).join('・')}</p>
   <h3>報酬</h3>
-  <p>クエスト完了時は運営本部と依頼主から。正しく却下したときは運営本部から少額。全滅したときは報酬なし。不適の理由が2つ以上あるまま出発すると全滅します。</p>`;
+  <p>クエスト完了時は、運営本部と依頼主から。正しく却下したときは、運営本部から少額。全滅したときは報酬なし。<br>
+  不適の理由が2つ以上あるまま出発すると、全滅します。</p>`;
 }
 
 /* ---------- 入力 ---------- */
@@ -1112,6 +1143,29 @@ function fit() {
 function setPaused(v) {
   if (!busy()) v = false;
   S.paused = v; $('#pauseOv').hidden = !v;
+  if (v) showOptions(false);
+}
+
+/* ---------- オプション（一時停止中に開く） ---------- */
+const OPT_KEY = 'guild-clerk-options';
+const OPT = { visit: CFG.VISIT_RATE.def };
+try { const o = JSON.parse(localStorage.getItem(OPT_KEY) || 'null'); if (o && typeof o.visit === 'number') OPT.visit = clamp(o.visit, CFG.VISIT_RATE.min, CFG.VISIT_RATE.max); } catch (e) { /* noop */ }
+function saveOpt() { try { localStorage.setItem(OPT_KEY, JSON.stringify(OPT)); } catch (e) { /* noop */ } }
+function showOptions(v) {
+  $('#optBox').hidden = !v; $('#pauseMain').hidden = v;
+  if (v) renderOptions();
+}
+function renderOptions() {
+  const avg = (CFG.ARRIVAL_GAP[0] + CFG.ARRIVAL_GAP[1]) / 2 / OPT.visit;
+  $('#optVisit').textContent = '×' + OPT.visit.toFixed(1);
+  $('#optVisitNote').textContent = `来訪の間隔：平均 約${Math.round(avg)}分（ゲーム内）`;
+  $('#optVisitDown').disabled = OPT.visit <= CFG.VISIT_RATE.min + 1e-9;
+  $('#optVisitUp').disabled = OPT.visit >= CFG.VISIT_RATE.max - 1e-9;
+}
+function stepVisit(d) {
+  const r = CFG.VISIT_RATE;
+  OPT.visit = Math.round(clamp(OPT.visit + d * r.step, r.min, r.max) * 10) / 10;
+  saveOpt(); renderOptions(); SFX.click();
 }
 function setup() {
   const booths = $('#booths');
@@ -1145,6 +1199,11 @@ function setup() {
   $('#btnRulesClose').addEventListener('click', () => { $('#rulesOv').hidden = true; });
   $('#btnPause').addEventListener('click', () => setPaused(!S.paused));
   $('#btnResume').addEventListener('click', () => setPaused(false));
+  $('#btnOptions').addEventListener('click', () => { showOptions(true); SFX.click(); });
+  $('#btnOptBack').addEventListener('click', () => { showOptions(false); SFX.click(); });
+  $('#optVisitDown').addEventListener('click', () => stepVisit(-1));
+  $('#optVisitUp').addEventListener('click', () => stepVisit(1));
+  $('#optVisitReset').addEventListener('click', () => { OPT.visit = CFG.VISIT_RATE.def; saveOpt(); renderOptions(); SFX.click(); });
   addEventListener('keydown', e => {
     if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
       if (!$('#rulesOv').hidden && e.key === 'Escape') { $('#rulesOv').hidden = true; return; }
