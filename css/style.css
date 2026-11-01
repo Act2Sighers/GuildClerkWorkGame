@@ -241,7 +241,8 @@ button:focus-visible { outline: 3px solid var(--sel); outline-offset: 2px; }
 .docsheet:hover { background: #fff6dc; }
 .docsheet h4 { margin: 0 0 4px; font-size: 14px; font-weight: normal; text-align: center; border-bottom: 2px solid #1c110b; }
 .docsheet .seal { position: absolute; right: 10px; bottom: 10px; width: 46px; height: 46px; border: 2px dashed var(--ink-soft); display: flex; align-items: center; justify-content: center; color: var(--ink-soft); font-size: 11px; }
-.docsheet .seal.done { border: 3px solid var(--bad); color: var(--bad); border-radius: 50%; font-size: 15px; transform: rotate(-12deg); animation: stamp .25s steps(3); }
+.docsheet .seal.done { border: 3px solid var(--bad); color: var(--bad); border-radius: 50%; font-size: 15px; transform: rotate(-12deg); }
+.docsheet .seal.done.anim { animation: stamp .25s steps(3); }
 @keyframes stamp { from { transform: scale(1.8) rotate(-12deg); opacity: 0; } }
 .hint-line { position: absolute; left: 14px; right: 14px; top: 194px; color: #f6ecd2; font-size: 14px; text-shadow: 0 2px 0 #1c110b; }
 
@@ -334,7 +335,8 @@ button:focus-visible { outline: 3px solid var(--sel); outline-offset: 2px; }
 .orow .oprice { color: var(--ink-soft); font-size: 13px; flex: 1; }
 .oslot { width: 64px; height: 64px; border: 3px dashed var(--ink-soft); background: #fffaf0; padding: 0; display: flex; align-items: center; justify-content: center; }
 .oslot:hover { background: #fff0c8; }
-.oslot.done { border: 3px solid var(--bad); border-radius: 50%; color: var(--bad); font-size: 26px; background: transparent; transform: rotate(-8deg); animation: stamp .25s steps(3); }
+.oslot.done { border: 3px solid var(--bad); border-radius: 50%; color: var(--bad); font-size: 26px; background: transparent; transform: rotate(-8deg); }
+.oslot.done.anim { animation: stamp .25s steps(3); }
 .orow.total { border-top: 2px solid #1c110b; padding-top: 6px; font-size: 18px; justify-content: flex-end; }
 .obtns { display: flex; gap: 8px; justify-content: center; margin-top: 10px; }
 .btn.small { font-size: 14px; padding: 5px 12px; }
@@ -367,8 +369,9 @@ button:focus-visible { outline: 3px solid var(--sel); outline-offset: 2px; }
 .decision-stamp {
   position: absolute; right: 14px; top: 92px; width: 92px; height: 92px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center; font-size: 28px; border: 5px solid; transform: rotate(-14deg);
-  background: rgba(255, 255, 255, .25); animation: bigstamp .3s steps(3);
+  background: rgba(255, 255, 255, .25);
 }
+.decision-stamp.anim { animation: bigstamp .3s steps(3); }
 .decision-stamp.approve { color: #2f7a3a; border-color: #2f7a3a; }
 .decision-stamp.reject { color: var(--bad); border-color: var(--bad); }
 @keyframes bigstamp { from { transform: scale(2) rotate(-14deg); opacity: 0; } }

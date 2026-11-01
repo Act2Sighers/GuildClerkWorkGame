@@ -122,7 +122,7 @@ function freeSlot(slot) {
 function approve(slot) {
   const p = slot.party; if (!p || slot.state !== 'reception') return;
   const probs = problemsOf(p.ev);
-  S.stats.approved++; p.decision = 'approve'; SFX.stamp();
+  S.stats.approved++; p.decision = 'approve'; markFresh('dec' + p.id); SFX.stamp();
   if (probs.length) {
     p.mistakes++; p.wrongApproval = true; S.stats.approveWrong++; clerkFace('sad', 1.4);
     toast(`窓口${slot.i + 1}：誤った認可です（本来は却下：${reasonText(probs)}）`, 'bad');
@@ -151,7 +151,7 @@ function reject(slot) {
   const chosen = REASONS.filter(r => p.checks[r.id]).map(r => r.id);
   if (!chosen.length) return;
   const probs = problemsOf(p.ev);
-  S.stats.rejected++; p.decision = 'reject'; SFX.stamp();
+  S.stats.rejected++; p.decision = 'reject'; markFresh('dec' + p.id); SFX.stamp();
   if (!probs.length) {
     S.stats.rejectWrong++; clerkFace('sad', 1.4);
     toast(`窓口${slot.i + 1}：誤った却下です。このパーティは受注して問題ありませんでした`, 'bad');
@@ -210,7 +210,7 @@ function toggleTag() {
 function stamp() {
   const slot = selSlot(); const p = slot.party;
   if (slot.state !== 'returned' || !p || p.stamped) return;
-  p.stamped = true; S.hand = null; SFX.stamp();
+  p.stamped = true; S.hand = null; markFresh('seal' + p.id); SFX.stamp();
   const need = { gel: p.members.filter(m => m.status === 'hurt').length, elixir: p.members.filter(m => m.status === 'ghost').length };
   const got = { gel: p.counter.filter(c => c.kind === 'gel').length, elixir: p.counter.filter(c => c.kind === 'elixir').length };
   const miss = [];
@@ -308,7 +308,7 @@ function stampSlot(kind) {
   if (!S.sheet) return;
   if (typeof S.hand !== 'number') { toast('先に「2」「5」「10」のハンコを手に取ります'); return; }
   if (S.sheet[kind]) { toast('この枠にはもう押してあります。書き直すなら注文書を捨てます', 'bad'); return; }
-  S.sheet[kind] = S.hand; SFX.stamp();
+  S.sheet[kind] = S.hand; markFresh('os' + kind); SFX.stamp();
 }
 const sheetCost = sh => KINDS.reduce((a, k) => a + sh[k] * CFG.PRICE[k], 0);
 function sendOrder() {
@@ -406,6 +406,11 @@ function sprite(gid, status, scale) {
 function itemImg(kind, cls) { const i = el('img', 'px ' + (cls || '')); i.src = `img/item_${kind}.png`; i.alt = ITEM_NAME[kind] || ''; return i; }
 
 /* ---------- 画面 ---------- */
+/* ハンコの押印アニメーションは、押した直後の描画でだけ付ける */
+const FRESH = new Map();
+function markFresh(key) { FRESH.set(key, performance.now()); }
+function freshCls(key) { const t = FRESH.get(key); return t != null && performance.now() - t < 400 ? ' anim' : ''; }
+
 /* 受付嬢の表情 */
 const CLERK_DIR = 'img/newGraphic(clerk)/';
 const CLERK_FACES = ['eyeopen', 'blink_1', 'blink_2', 'happy', 'sad', 'rest'];
@@ -526,7 +531,7 @@ function questSheet(q, p) {
     const r = el('div', 'qrow'); r.appendChild(el('span', 'k', k)); r.appendChild(el('span', 'v', v)); sh.appendChild(r);
   }
   sh.appendChild(el('div', 'qflavor', `「${q.title}」`));
-  if (p.decision) sh.appendChild(el('div', 'decision-stamp ' + p.decision, p.decision === 'approve' ? '認可' : '却下'));
+  if (p.decision) sh.appendChild(el('div', 'decision-stamp ' + p.decision + freshCls('dec' + p.id), p.decision === 'approve' ? '認可' : '却下'));
   return sh;
 }
 function deskKeyOf() {
@@ -634,7 +639,7 @@ function deskReturned(d, s, p, head) {
   doc.appendChild(el('h4', '', 'クエスト後手当 書類'));
   doc.appendChild(el('div', '', `${p.name}`));
   doc.appendChild(el('div', '', `${p.quest.type}・${p.quest.diff}級`));
-  doc.appendChild(el('div', 'seal' + (p.stamped ? ' done' : ''), p.stamped ? '済' : '印'));
+  doc.appendChild(el('div', 'seal' + (p.stamped ? ' done' + freshCls('seal' + p.id) : ''), p.stamped ? '済' : '印'));
   doc.addEventListener('click', stamp);
   tray.appendChild(doc);
   d.appendChild(tray);
@@ -710,7 +715,7 @@ function deskNight(d) {
       const r = el('div', 'orow');
       r.appendChild(el('span', 'oname', ITEM_NAME[k]));
       r.appendChild(el('span', 'oprice', `単価 ${CFG.PRICE[k]}G`));
-      const slot = el('button', 'oslot' + (S.sheet[k] ? ' done' : ''));
+      const slot = el('button', 'oslot' + (S.sheet[k] ? ' done' + freshCls('os' + k) : ''));
       slot.appendChild(el('span', '', S.sheet[k] ? String(S.sheet[k]) : ''));
       slot.title = 'ハンコを持ってクリック（空欄は0個）';
       slot.addEventListener('click', () => stampSlot(k));
