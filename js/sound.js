@@ -73,6 +73,11 @@ const SFX = (() => {
     open() { [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.3, 'triangle', 0.08, null, i * 0.09)); },
     close() { bellNote(784, 0, 0.09); bellNote(659, 0.3, 0.09); bellNote(523, 0.6, 0.09); },
     fanfare() { [523, 659, 784, 1046, 1318].forEach((f, i) => { tone(f, 0.4, 'triangle', 0.08, null, i * 0.1); }); },
+    pop() { tone(820, 0.07, 'square', 0.04, 260); noise(0.04, 0.1, 'highpass', 2000); },        // 栓が抜ける・はまる
+    splash() { noise(0.16, 0.12, 'bandpass', 900 + Math.random() * 500, 0, 1.2); },              // 水の中で振る
+    rub() { noise(0.07, 0.06, 'highpass', 4200 + Math.random() * 800); },                        // 布でこする
+    sparkle() { [1568, 2093, 2637].forEach((f, i) => tone(f, 0.16, 'sine', 0.05, null, i * 0.06)); },
+    buzz() { tone(98, 0.32, 'sawtooth', 0.07); tone(104, 0.32, 'square', 0.04); },              // 合わない栓
     night() { tone(392, 0.8, 'sine', 0.06); tone(494, 0.8, 'sine', 0.05, null, 0.2); tone(587, 1.0, 'sine', 0.05, null, 0.4); },
   };
   return { init, setOn, isOn: () => A.on, ...fx };

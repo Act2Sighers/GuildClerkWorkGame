@@ -28,7 +28,7 @@ const PUTAWAY_W = 18;             // 右の端（しまう／郵便）
 const SM = 48;                    // 小物・道具の大きさ
 const FIX = {
   apply: { x: 10, y: 398, w: 96, h: 78, label: '受注申請用紙' },
-  order: { x: 114, y: 398, w: 96, h: 78, label: '注文用紙' },
+  order: { x: 10, y: 398, w: 96, h: 78, label: '注文用紙' },
   calendar: { x: 598, y: 398, w: 112, h: 78 },
   trash: { x: 718, y: 398, w: 74, h: 78 },
 };
@@ -36,10 +36,20 @@ const TOOL_DEF = {
   pen: { name: '筆記具', desc: '受注申請用紙の却下事項に、左クリックでチェック、右クリックでチェックを消す', home: [226, 414] },
   ar: { name: '認可/却下用ハンコ', desc: '受注申請用紙に押す。ホイール上で「認可」、下で「却下」', home: [282, 414] },
   seal: { name: 'ギルド承認印', desc: '終了対応の受注申請用紙・クエスト要請の写し、注文用紙に押す', home: [338, 414] },
-  q2: { name: '数量ハンコ「2」', desc: '注文用紙の品の枠に押す', home: [400, 414] },
-  q5: { name: '数量ハンコ「5」', desc: '注文用紙の品の枠に押す', home: [452, 414] },
-  q10: { name: '数量ハンコ「10」', desc: '注文用紙の品の枠に押す', home: [504, 414] },
+  q2: { name: '数量ハンコ「2」', desc: '注文用紙の品の枠に押す', home: [282, 414] },
+  q5: { name: '数量ハンコ「5」', desc: '注文用紙の品の枠に押す', home: [338, 414] },
+  q10: { name: '数量ハンコ「10」', desc: '注文用紙の品の枠に押す', home: [394, 414] },
 };
+// テーブルごとの道具と備品。個人用テーブルの「注文書を書く」セットでは、承認印を左に寄せる
+const TABLE_KIT = {
+  normal: { tools: { pen: null, ar: null, seal: null }, fix: ['apply', 'calendar', 'trash'] },
+  order: { tools: { seal: [226, 414], q2: null, q5: null, q10: null }, fix: ['order', 'calendar', 'trash'] },
+};
+// 個人用テーブルのセット（そのとき開けるものだけを切り替えられる）
+const PSETS = [
+  { id: 'wash', name: '内職：容器の洗浄', open: () => S.phase === 'business' },
+  { id: 'order', name: '注文書を書く', open: () => S.phase === 'night' },
+];
 const PAPER = { quest: [196, 262], card: [214, 118], apply: [196, 250], pform: [196, 250], order: [196, 206] };
 const BOOK = { roster: [140, 190], manual: [212, 336] };
 const SMALL_DESC = {
@@ -62,10 +72,17 @@ const S = {
   quests: [], returnQueue: [],
   tables: Array.from({ length: CFG.SLOTS }, (_, i) => ({ i, state: 'empty', party: null, objs: [], until: 0, enter: false })),
   selected: 0, hand: null, eq: 0, stats: null, seq: 1, z: 1, rt: 0, nextArrival: CFG.OPEN + 8,
+  view: 'table', pset: 'wash',
+  ptab: { order: { i: 'order', state: 'empty', party: null, objs: [], kit: 'order' }, wash: { i: 'wash', state: 'empty', party: null, objs: [], kit: 'none' } },
+  wash: null,
 };
-const tbl = () => S.tables[S.selected];
+const personal = () => S.view === 'personal';
+const tbl = () => personal() ? S.ptab[S.pset] : S.tables[S.selected];
+const openSets = () => PSETS.filter(p => p.open());
+// 個人用テーブルで今開いているセット（開けるものがなければ null）
+const curSet = () => { if (!personal()) return null; const a = openSets(); return a.find(p => p.id === S.pset) ? S.pset : null; };
 function newStats() {
-  return { visitors: 0, approved: 0, rejected: 0, recMiss: 0, returned: 0, retMiss: 0, lost: 0, incomeHQ: 0, incomeOwner: 0, used: { gel: 0, elixir: 0 }, closedAway: 0, orderCost: 0 };
+  return { visitors: 0, approved: 0, rejected: 0, recMiss: 0, returned: 0, retMiss: 0, lost: 0, incomeHQ: 0, incomeOwner: 0, used: { gel: 0, elixir: 0 }, closedAway: 0, orderCost: 0, incomeSide: 0, washBoxes: 0 };
 }
 const today = () => calFrom(calOrd(CAL.START) + S.day - 1);
 const todayOrd = () => calOrd(CAL.START) + S.day - 1;
@@ -85,17 +102,16 @@ const PACK_OF = { 2: 'pouch', 5: 'crate_s', 10: 'crate_l' };
 // cls: paper / book / small / tool。personal（個人書類）・util（ユーティリティ）・tray（用紙入れから出した用紙）
 function addObj(t, o) { o.id = S.seq++; if (o.cls === 'paper' || o.cls === 'book') o.z = S.z++; t.objs.push(o); return o; }
 function makeTools(t) {
-  for (const [k, d] of Object.entries(TOOL_DEF)) addObj(t, { cls: 'tool', tool: k, x: d.home[0], y: d.home[1], face: 'approve' });
+  for (const [k, h] of Object.entries(TABLE_KIT[t.kit].tools)) { const [x, y] = h || TOOL_DEF[k].home; addObj(t, { cls: 'tool', tool: k, x, y, home: [x, y], face: 'approve' }); }
 }
-const nightOnly = o => (o.cls === 'tool' && o.tool[0] === 'q') || o.doc === 'order';
-const hiddenNow = o => nightOnly(o) && S.phase !== 'night';
+const kitFix = t => (TABLE_KIT[t.kit] || { fix: [] }).fix;
 const objW = o => o.cls === 'small' || o.cls === 'tool' ? SM : o.cls === 'book' ? BOOK[o.book][0] * 2 : PAPER[o.doc][0];
 const objH = o => o.cls === 'small' || o.cls === 'tool' ? SM : o.cls === 'book' ? BOOK[o.book][1] : PAPER[o.doc][1];
 const rectOf = o => ({ x: o.x, y: o.y, w: objW(o), h: objH(o) });
 const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 function obstacles(t, except) {
-  const r = t.objs.filter(o => (o.cls === 'small' || o.cls === 'tool') && !o.held && o !== except && !hiddenNow(o)).map(rectOf);
-  for (const [k, f] of Object.entries(FIX)) if (k !== 'order' || S.phase === 'night') r.push({ x: f.x, y: f.y, w: f.w, h: f.h });
+  const r = t.objs.filter(o => (o.cls === 'small' || o.cls === 'tool') && !o.held && o !== except).map(rectOf);
+  for (const k of kitFix(t)) { const f = FIX[k]; r.push({ x: f.x, y: f.y, w: f.w, h: f.h }); }
   return r;
 }
 // 小物・道具は重ならないように置き直す
@@ -130,7 +146,7 @@ function bringFront(o) { if (o.cls === 'paper' || o.cls === 'book') o.z = S.z++;
 /* ================= 手 ================= */
 function pickUp(o) { S.hand = o; o.held = true; SFX.grab(); dirty(); }
 function releaseTool(o) {
-  const d = TOOL_DEF[o.tool]; o.held = false; o.x = d.home[0]; o.y = d.home[1];
+  const hm = o.home || TOOL_DEF[o.tool].home; o.held = false; o.x = hm[0]; o.y = hm[1];
   if (S.hand === o) S.hand = null;
   const t = tbl();
   for (const s of t.objs) if (s.cls === 'small' && !s.held && overlap(rectOf(s), rectOf(o))) settle(t, s);
@@ -169,9 +185,23 @@ function stowUtilities(t) {
   }
 }
 function selectTable(i) {
-  if (i === S.selected) return;
+  if (i === S.selected && !personal()) return;
+  stowUtilities(tbl()); cancelWashDrag();
+  S.view = 'table'; S.selected = i; SFX.click(); dirty();
+}
+// 受付嬢の絵をクリック：個人用テーブルを開く
+function openPersonal() {
+  if (S.phase === 'title' || S.phase === 'report' || S.paused) return;
+  if (personal()) return;
   stowUtilities(tbl());
-  S.selected = i; SFX.click(); dirty();
+  S.view = 'personal'; fixPset(); SFX.click(); dirty();
+}
+function fixPset() { const a = openSets(); if (a.length && !a.find(p => p.id === S.pset)) S.pset = a[0].id; }
+function stepSet(d) {
+  const a = openSets(); if (a.length < 2) return;
+  stowUtilities(tbl()); cancelWashDrag();
+  const i = a.findIndex(p => p.id === S.pset);
+  S.pset = a[(i + d + a.length) % a.length].id; SFX.click(); dirty();
 }
 
 /* ================= パーティの生成と判定（縮小版） ================= */
@@ -439,7 +469,7 @@ function toNight() { S.phase = 'night'; S.clock = CFG.CLOSE + 10; $('#reportOv')
 function nextDay() {
   if (S.phase !== 'night') return;
   stowUtilities(tbl());
-  for (const t of S.tables) t.objs = t.objs.filter(o => o.doc !== 'order'); // 出したままの注文用紙は片付ける
+  S.ptab.order.objs = S.ptab.order.objs.filter(o => o.doc !== 'order'); // 出したままの注文用紙は片付ける
   S.day++; save(); toMorning();
 }
 
@@ -464,18 +494,19 @@ function sendOrder(form) {
 const SAVE_KEY = 'guild-clerk-work-v2';
 function save() {
   try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 1, day: S.day, gold: S.gold, shelf: S.shelf, stock: S.stock, foot: S.foot, pending: S.pending, quests: S.quests.concat(S.returnQueue), seq: S.seq, manualFlip: S.manualFlip }));
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 1, day: S.day, gold: S.gold, shelf: S.shelf, stock: S.stock, foot: S.foot, pending: S.pending, quests: S.quests.concat(S.returnQueue), seq: S.seq, manualFlip: S.manualFlip, wash: S.wash }));
   } catch (e) { /* noop */ }
 }
 function loadSave() { try { const d = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); return d && d.v === 1 ? d : null; } catch (e) { return null; } }
 function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* noop */ } }
 function reset() {
-  Object.assign(S, { day: 1, gold: CFG.START_GOLD, shelf: makeShelf(V2.START_STOCK), stock: [], foot: [], pending: [], bag: { manual: true, tags: true }, manualFlip: 0, quests: [], returnQueue: [], selected: 0, hand: null, eq: 0, stats: newStats(), seq: 1 });
-  for (const t of S.tables) { t.state = 'empty'; t.party = null; t.objs = []; makeTools(t); }
+  Object.assign(S, { day: 1, gold: CFG.START_GOLD, shelf: makeShelf(V2.START_STOCK), stock: [], foot: [], pending: [], bag: { manual: true, tags: true }, manualFlip: 0, quests: [], returnQueue: [], selected: 0, hand: null, eq: 0, stats: newStats(), seq: 1, view: 'table', pset: 'wash', wash: newWash() });
+  for (const t of S.tables) { t.state = 'empty'; t.party = null; t.objs = []; t.kit = 'normal'; makeTools(t); }
+  S.ptab.order.objs = []; makeTools(S.ptab.order);
 }
 function applySave(d) {
   reset();
-  Object.assign(S, { day: d.day, gold: d.gold, shelf: d.shelf, stock: d.stock || [], foot: d.foot || [], pending: d.pending || [], quests: d.quests || [], seq: d.seq || 1, manualFlip: d.manualFlip || 0 });
+  Object.assign(S, { day: d.day, gold: d.gold, shelf: d.shelf, stock: d.stock || [], foot: d.foot || [], pending: d.pending || [], quests: d.quests || [], seq: d.seq || 1, manualFlip: d.manualFlip || 0, wash: d.wash && d.wash.rack ? d.wash : newWash() });
 }
 
 /* ================= 画面：テーブル ================= */
@@ -602,14 +633,15 @@ function toolEl(o) {
   return e;
 }
 function fixtureEls(t, root) {
-  for (const k of ['apply', 'order']) {
-    if (k === 'order' && S.phase !== 'night') continue;
+  for (const k of kitFix(t)) {
+    if (k !== 'apply' && k !== 'order') continue;
     const f = FIX[k];
     const e = el('div', 'fix tray tray-' + k); e.dataset.fix = k;
     Object.assign(e.style, { left: f.x + 'px', top: f.y + 'px', width: f.w + 'px', height: f.h + 'px' });
     e.appendChild(el('div', 'tray-paper')); e.appendChild(el('div', 'tray-label', f.label));
     root.appendChild(e);
   }
+  if (!kitFix(t).includes('calendar')) return;
   const c = FIX.calendar, ce = el('div', 'fix calendar'); ce.dataset.fix = 'calendar';
   Object.assign(ce.style, { left: c.x + 'px', top: c.y + 'px', width: c.w + 'px', height: c.h + 'px' });
   const dt = today();
@@ -623,14 +655,32 @@ function fixtureEls(t, root) {
   te.appendChild(el('div', 'trash-can')); te.appendChild(el('div', 'tray-label', 'ゴミ箱'));
   root.appendChild(te);
 }
+function personalHead(root, set) {
+  const hd = el('div', 'p-head');
+  hd.appendChild(el('span', 'p-title', '個人用テーブル'));
+  if (set) {
+    const many = openSets().length > 1;
+    const prev = el('button', 'p-arrow' + (many ? '' : ' off'), '◀'); prev.dataset.pset = '-1';
+    const next = el('button', 'p-arrow' + (many ? '' : ' off'), '▶'); next.dataset.pset = '1';
+    hd.appendChild(prev); hd.appendChild(el('span', 'p-set', PSETS.find(p => p.id === set).name)); hd.appendChild(next);
+    if (set === 'wash') hd.appendChild(el('span', 'p-hint', washHint()));
+  }
+  root.appendChild(hd);
+}
 function renderTable() {
   const t = tbl();
   const root = $('#table'); root.innerHTML = '';
-  root.appendChild(el('div', 'handover-zone', '↑ 依頼者へ渡す'));
+  root.classList.toggle('personal', personal());
+  if (personal()) {
+    const set = curSet();
+    personalHead(root, set);
+    if (!set) { root.appendChild(el('div', 'p-empty', '今はできることがありません')); return; }
+    if (set === 'wash') { renderWash(root); return; }
+  } else root.appendChild(el('div', 'handover-zone', '↑ 依頼者へ渡す'));
   root.appendChild(el('div', 'putaway-zone'));
   fixtureEls(t, root);
   for (const o of t.objs) {
-    if (o.held || hiddenNow(o)) continue;
+    if (o.held) continue;
     const e = o.cls === 'paper' ? paperEl(o) : o.cls === 'book' ? bookEl(o) : o.cls === 'small' ? smallEl(o) : toolEl(o);
     e.dataset.id = o.id;
     e.style.left = o.x + 'px'; e.style.top = o.y + 'px';
@@ -646,7 +696,7 @@ function renderLobby() {
   const morningNight = S.phase === 'morning' || S.phase === 'night';
   $('#dayCtl').hidden = !morningNight;
   if (morningNight) {
-    $('#dayCtlText').textContent = S.phase === 'morning' ? '開店の準備（品出しはいつでもできます）' : '明日の準備（注文用紙は郵便物入れへ）';
+    $('#dayCtlText').textContent = S.phase === 'morning' ? '開店の準備（品出しはいつでもできます）' : '明日の準備（注文は個人用テーブルで）';
     $('#btnDay').textContent = S.phase === 'morning' ? '営業開始' : '次の日へ';
   }
   for (const t of S.tables) {
@@ -667,7 +717,7 @@ function renderLobby() {
         const bt = bubbleText(p); if (bt) b.root.appendChild(el('div', 'bubble', bt));
       } else b.root.appendChild(el('div', 'empty-msg', '— 空き —'));
     }
-    b.root.classList.toggle('sel', t.i === S.selected);
+    b.root.classList.toggle('sel', t.i === S.selected && !personal());
   }
   $('#queueInfo').textContent = `クエスト中 ${S.quests.length}組　帰還待ち ${S.returnQueue.length}組`;
 }
@@ -749,7 +799,7 @@ function renderTop() {
   st.classList.toggle('closed', S.phase !== 'business');
   $('#tbGold').textContent = S.gold;
 }
-let lastClockMin = -1;
+let lastClockMin = -1, lastPhase = '';
 function render() {
   renderTop(); renderLobby();
   const cm = Math.floor(S.clock);
@@ -757,6 +807,8 @@ function render() {
   if (isDirty) { isDirty = false; renderTable(); renderEq(); }
   renderHand();
   renderClerk();
+  $('#clerkPanel').classList.toggle('open', personal());
+  if (S.phase !== lastPhase) { lastPhase = S.phase; if (personal()) { stowUtilities(tbl()); cancelWashDrag(); fixPset(); } dirty(); }
   const lob = $('#lobby'); lob.classList.toggle('night', S.phase === 'night'); lob.classList.toggle('dawn', S.phase === 'morning');
 }
 function renderHand() {
@@ -811,11 +863,12 @@ function showReport() {
     ['帰還したパーティ', st.returned + '組'], ['戻らなかったパーティ', st.lost + '組', st.lost], ['終了対応のミス', st.retMiss + '件', st.retMiss],
     ['使った回復ジェル', st.used.gel + '個'], ['使った霊薬', st.used.elixir + '個'],
     ['運営本部から', st.incomeHQ + 'G'], ['依頼主から', st.incomeOwner + 'G'],
+    ['内職（容器の洗浄）', `${st.washBoxes}箱 ${st.incomeSide}G`], ['注文の代金', st.orderCost + 'G'],
     ['クエスト中のパーティ', S.quests.length + S.returnQueue.length + '組'], ['物品棚', `${shelfCount()}/${V2.SHELF_MAX}`],
   ];
   const g = el('div', 'rep-grid');
   for (const r of rows) { const d = el('div', r[2] ? 'neg' : ''); d.appendChild(el('span', '', r[0])); d.appendChild(el('span', '', r[1])); g.appendChild(d); }
-  const tot = el('div', 'total'); tot.appendChild(el('span', '', `本日の収入 ${st.incomeHQ + st.incomeOwner}G　／　支店運営費 ${S.gold}G`)); g.appendChild(tot);
+  const tot = el('div', 'total'); tot.appendChild(el('span', '', `本日の収入 ${st.incomeHQ + st.incomeOwner + st.incomeSide}G　／　支店運営費 ${S.gold}G`)); g.appendChild(tot);
   const body = $('#repBody'); body.innerHTML = ''; body.appendChild(g);
   $('#reportOv').hidden = false;
 }
@@ -840,6 +893,9 @@ function onDown(e) {
   if (!busyOrPrep()) return;
   e.preventDefault();
   SFX.init();
+  const arrow = e.target.closest && e.target.closest('[data-pset]');
+  if (arrow) { if (e.button === 0) stepSet(+arrow.dataset.pset); return; }
+  if (personal()) { const set = curSet(); if (!set) return; if (set === 'wash') { washDown(e); return; } }
   const hit = hitAt(e);
   press = { x: e.clientX, y: e.clientY, button: e.button, hit, drag: false, pid: e.pointerId };
   if (e.button === 0 && isDraggable(hit.obj)) {
@@ -848,6 +904,7 @@ function onDown(e) {
 }
 function onMove(e) {
   moveHand(e);
+  if (press && press.wash) { washMove(e); return; }
   if (!press || press.button !== 0) return;
   const o = press.hit.obj;
   if (!press.drag) {
@@ -865,6 +922,7 @@ function onMove(e) {
 function onUp(e) {
   if (!press) return;
   const pr = press; press = null;
+  if (pr.wash) { washUp(pr, e); return; }
   hideZones();
   if (pr.drag) { dropObj(pr.hit.obj, e); return; }
   if (Math.hypot(e.clientX - pr.x, e.clientY - pr.y) >= OPT.drag) return;
@@ -1021,6 +1079,7 @@ function flipBook(o, dir) {
 function onWheel(e) {
   if (!busyOrPrep()) return;
   e.preventDefault();
+  if (personal() && curSet() !== 'order') return;
   const h = S.hand;
   if (h && h.tool === 'ar') { const f = e.deltaY < 0 ? 'approve' : 'reject'; if (h.face !== f) { h.face = f; SFX.click(); } return; }
   const hit = hitAt(e);
@@ -1067,9 +1126,12 @@ function onEqUp(e) {
   eqClick(pr, e);
 }
 function overTable(e) { const r = $('#table').getBoundingClientRect(); return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom; }
+let noteAt = 0;
+function noPersonal() { SFX.deny(); if (S.rt - noteAt > 2 || S.phase !== 'business') { noteAt = S.rt; toast('個人用テーブルには、ほかの物を出せません'); } }
 function eqDrop(pr, e) {
   const t = tbl();
   if (overTable(e)) {
+    if (personal()) { noPersonal(); return; }
     const p = tablePoint(e);
     if (pr.shelf != null) { const k = S.shelf[pr.shelf]; S.shelf[pr.shelf] = null; const o = addObj(t, { cls: 'small', sub: 'item', item: k, util: true, x: p.x - SM / 2, y: p.y - SM / 2 }); settle(t, o); SFX.clink(); dirty(); }
     else if (pr.bag) { takeFromBag(pr.bag, p); }
@@ -1089,7 +1151,7 @@ function eqClick(pr, e) {
   if (eq === 'shelf') {
     if (pr.shelf != null && S.shelf[pr.shelf]) {
       const k = S.shelf[pr.shelf];
-      if (btn === 0) { S.shelf[pr.shelf] = null; const t = tbl(); const sp = smallSpot(t); const o = addObj(t, { cls: 'small', sub: 'item', item: k, util: true, x: sp.x, y: sp.y }); settle(t, o); SFX.clink(); dirty(); return; }
+      if (btn === 0) { if (personal()) { noPersonal(); return; } S.shelf[pr.shelf] = null; const t = tbl(); const sp = smallSpot(t); const o = addObj(t, { cls: 'small', sub: 'item', item: k, util: true, x: sp.x, y: sp.y }); settle(t, o); SFX.clink(); dirty(); return; }
       if (btn === 2) { const b = S.foot.find(x => x.kind === k && x.left < x.n); if (b) { S.shelf[pr.shelf] = null; b.left++; SFX.clink(); dirty(); } else SFX.deny(); return; }
     }
     if (pr.foot != null && S.foot[pr.foot]) {
@@ -1103,7 +1165,7 @@ function eqClick(pr, e) {
       S.foot.push(S.stock.splice(pr.stock, 1)[0]); SFX.thump(); toast('箱を物品棚の足元に運びました'); dirty(); return;
     }
   } else if (eq === 'bag') {
-    if (pr.bag && btn === 0) { takeFromBag(pr.bag, null); return; }
+    if (pr.bag && btn === 0) { if (personal()) { noPersonal(); return; } takeFromBag(pr.bag, null); return; }
   }
 }
 function takeFromBag(what, p) {
@@ -1118,6 +1180,372 @@ function takeFromBag(what, p) {
     const o = addObj(t, { cls: 'small', sub: 'tags', util: true, x: sp.x, y: sp.y }); settle(t, o);
     S.bag.tags = false; SFX.grab(); dirty();
   }
+}
+
+/* ================= 内職：容器の洗浄 ================= */
+// ① 回収箱 → 作業布 → タグと栓を外す（栓はトレーへ）→ 桶で振り洗い → 布で拭く → 乾燥棚（10本）
+// ③ 乾燥棚 → 作業布 → 合う栓を付ける → 仮置き台 → 乾燥棚が空になったら箱に詰める → 箱が閉じて手間賃
+const WK = 3;                                     // 素材の表示倍率
+const WBW = 16 * WK, WBH = 20 * WK;               // 容器の表示サイズ
+const WB_CORK = { gel: [2, 3], elixir: [4, 5] };  // 容器の絵の中での栓とタグの位置（素材の座標）
+const WB_TAG = { gel: [11, 7], elixir: [9, 9] };
+const CORK_SZ = { gel: [12, 4], elixir: [7, 6] };
+const WL = {
+  rbox: { x: 14, y: 34, w: 180, h: 132 },
+  mat: { x: 206, y: 32, w: 144, h: 152 },
+  bucket: { x: 362, y: 36, w: 168, h: 144 },
+  temp: { x: 538, y: 32, w: 254, h: 152 },
+  cloth: { x: 232, y: 206, w: 54, h: 42 },
+  tray: { x: 14, y: 300, w: 192, h: 90 },
+  rack: { x: 514, y: 300, w: 276, h: 174 },
+  cbox: { x: 514, y: 318, w: 276, h: 156 },
+};
+const MAT_POS = { x: WL.mat.x + (WL.mat.w - WBW) / 2, y: WL.mat.y + 62 };
+const WDESC = {
+  rbox: '回収箱：使い終わった容器が戻ってくる。ドラッグ（クリックでも）で作業布へ',
+  tag: 'タグ：ドラッグで引っぱって外す',
+  cork: '栓：ドラッグで引き抜く。抜いた栓はトレーへ',
+  bucket: '水を張った桶：容器を持ったまま入れて、左右に振って洗う',
+  cloth: '布：洗った容器の上でこすって拭く',
+  rack: '乾燥棚：拭いた容器を逆さにして干す（10本）',
+  tray: '栓のトレー：外した栓を並べておく',
+  temp: '仮置き台：栓をした容器を並べておく',
+  cbox: '緩衝材入りの箱：栓をした容器を10本詰めると閉じる',
+  mat: '作業布：容器はここで扱う',
+};
+function newWash() { return { stage: 1, mat: null, rack: Array(10).fill(null), tray: Array(10).fill(null), temp: Array(10).fill(null), box: [], cycles: 0 }; }
+const W = () => S.wash;
+const boxOpen = () => W().stage === 3 && W().rack.every(k => !k);
+const randKind = () => Math.random() < V2.NAISHOKU.elixirRate ? 'elixir' : 'gel';
+function washHint() {
+  const w = W(), m = w.mat;
+  if (w.stage === 1) {
+    const n = w.rack.filter(Boolean).length;
+    const step = !m ? '回収箱から容器を作業布へ' : (m.tag || m.cork) ? 'タグと栓を外す' : m.rinse < 1 ? '桶に入れて左右に振る' : m.wipe < 1 ? '布でこすって拭く' : '乾燥棚へ';
+    return `① 洗う（乾燥棚 ${n}/10）　${step}`;
+  }
+  if (!boxOpen()) return `③ 栓をする　${!m ? '乾燥棚から容器を作業布へ' : !m.cork ? '合う栓をトレーから付ける' : '仮置き台へ'}`;
+  return `③ 箱に詰める（${w.box.length}/10）`;
+}
+// 位置
+const rackPos = i => ({ x: WL.rack.x + (4 + (i % 5) * 17) * WK, y: WL.rack.y + (8 + Math.floor(i / 5) * 28) * WK });
+const trayCell = i => ({ x: WL.tray.x + (3 + (i % 5) * 12) * WK, y: WL.tray.y + (3 + Math.floor(i / 5) * 13) * WK, w: 11 * WK, h: 11 * WK });
+const tempPos = i => ({ x: WL.temp.x + 4 + (i % 5) * 50, y: WL.temp.y + 8 + Math.floor(i / 5) * 72 });
+const boxPos = i => { const r = i < 5 ? 0 : 1, c = i % 5; return { x: WL.cbox.x + ((r ? 10 : 6) + c * 16) * WK, y: WL.cbox.y + (r ? 10 : 4) * WK }; };
+const nearest = (n, pos, p, ok) => { let b = -1, bd = 1e9; for (let i = 0; i < n; i++) { if (!ok(i)) continue; const q = pos(i), d = Math.hypot(q.x + 24 - p.x, q.y + 30 - p.y); if (d < bd) { bd = d; b = i; } } return b; };
+
+/* ---------- 描画 ---------- */
+function wimg(src, cls) { const im = el('img', 'px ' + (cls || '')); im.src = 'img/naishoku/' + src + '.png'; im.draggable = false; return im; }
+function corkEl(kind) { const c = wimg('cork_' + kind, 'wcork'); c.style.width = CORK_SZ[kind][0] * WK + 'px'; c.style.height = CORK_SZ[kind][1] * WK + 'px'; return c; }
+// it: { kind, tag, cork, rinse, wipe }
+function bottleEl(it, o = {}) {
+  const e = el('div', 'wb' + (o.inv ? ' inv' : ''));
+  e.appendChild(wimg('bottle_' + it.kind));
+  if (it.rinse != null && it.rinse < 1) { const g = wimg('grime_' + it.kind, 'grime'); g.style.opacity = 1 - it.rinse; e.appendChild(g); }
+  if (it.rinse > 0 && it.wipe < 1) { const d = wimg('drops_' + it.kind, 'drops'); d.style.opacity = it.rinse >= 1 ? 1 - it.wipe : it.rinse; e.appendChild(d); }
+  if (it.cork) { const c = corkEl(it.kind); c.style.left = WB_CORK[it.kind][0] * WK + 'px'; c.style.top = WB_CORK[it.kind][1] * WK + 'px'; if (o.live) c.dataset.w = 'cork'; e.appendChild(c); }
+  if (it.tag) { const t = wimg('tag', 'wtag'); t.style.left = WB_TAG[it.kind][0] * WK + 'px'; t.style.top = WB_TAG[it.kind][1] * WK + 'px'; if (o.live) t.dataset.w = 'tag'; e.appendChild(t); }
+  return e;
+}
+const cleanOf = (kind, cork) => ({ kind, tag: false, cork, rinse: 1, wipe: 1 });
+function place(root, e, x, y) { e.style.left = x + 'px'; e.style.top = y + 'px'; root.appendChild(e); return e; }
+function box(cls, r, w) { const e = el('div', 'wfix ' + cls); Object.assign(e.style, { left: r.x + 'px', top: r.y + 'px', width: r.w + 'px', height: r.h + 'px' }); if (w) e.dataset.w = w; return e; }
+const WFX = [];   // 消えていく物（タグ・閉じた箱・きらめき）。作り直しても続きから再生する
+function fxAge(f) { return (performance.now() - f.at) / 1000; }
+function renderWash(root) {
+  const w = W(), st3 = w.stage === 3, open = boxOpen(), d = wdrag;
+  const hide = (what, i) => d && d.from === what && (i == null || d.idx === i);
+  // 回収箱
+  const rb = box('wrbox' + (st3 ? ' idle' : ''), WL.rbox, 'rbox'); rb.appendChild(wimg('returnbox')); rb.appendChild(el('span', 'wlab', '回収箱')); root.appendChild(rb);
+  // 作業布
+  const mat = box('wmat', WL.mat, 'mat'); mat.appendChild(el('span', 'wlab', '作業布')); root.appendChild(mat);
+  // 桶
+  const bk = box('wbucket' + (st3 ? ' idle' : ''), WL.bucket, 'bucket');
+  bk.appendChild(wimg('bucket_back', 'b-back')); bk.appendChild(wimg('bucket_water', 'b-water')); bk.appendChild(wimg('bucket_front', 'b-front'));
+  root.appendChild(bk);
+  // 仮置き台
+  const tp = box('wtemp' + (st3 ? '' : ' idle'), WL.temp); tp.appendChild(el('span', 'wlab', '仮置き台'));
+  root.appendChild(tp);
+  for (let i = 0; i < 10; i++) {
+    const q = tempPos(i), s = place(root, el('div', 'wslot'), q.x, q.y); s.dataset.w = 'temp:' + i;
+    if (w.temp[i] && !hide('temp', i)) s.appendChild(bottleEl(cleanOf(w.temp[i], true)));
+  }
+  // 栓のトレー
+  const tr = box('wtray', WL.tray); tr.appendChild(wimg('tray')); tr.appendChild(el('span', 'wlab', '栓のトレー')); root.appendChild(tr);
+  for (let i = 0; i < 10; i++) {
+    const c = trayCell(i), s = place(root, el('div', 'wcell'), c.x, c.y); s.style.width = c.w + 'px'; s.style.height = c.h + 'px'; s.dataset.w = 'tray:' + i;
+    if (w.tray[i] && !hide('tray', i)) s.appendChild(corkEl(w.tray[i]));
+  }
+  // 乾燥棚／箱
+  const boxFx = WFX.find(f => f.k === 'box' && fxAge(f) < 1.9);
+  if (!open) {
+    const rk = box('wrack', WL.rack); rk.appendChild(wimg('rack')); rk.appendChild(el('span', 'wlab', '乾燥棚')); root.appendChild(rk);
+    if (boxFx) { rk.classList.add('appear'); rk.style.animationDelay = -fxAge(boxFx) + 's'; }
+    for (let i = 0; i < 10; i++) {
+      const q = rackPos(i), s = place(root, el('div', 'wslot rk'), q.x, q.y); s.dataset.w = 'rack:' + i;
+      if (w.rack[i] && !hide('rack', i)) s.appendChild(bottleEl(cleanOf(w.rack[i], false), { inv: true }));
+    }
+  } else {
+    const cb = box('wcbox', WL.cbox, 'cbox'); cb.appendChild(wimg('cbox_back', 'x-back'));
+    w.box.forEach((k, i) => { const q = boxPos(i); place(cb, bottleEl(cleanOf(k, true)), q.x - WL.cbox.x, q.y - WL.cbox.y); });
+    cb.appendChild(wimg('cbox_front', 'x-front')); cb.appendChild(el('span', 'wlab', '緩衝材入りの箱'));
+    root.appendChild(cb);
+  }
+  // 布
+  if (!hide('cloth')) { const c = box('wcloth' + (st3 ? ' idle' : ''), WL.cloth, 'cloth'); c.appendChild(wimg('cloth')); root.appendChild(c); }
+  // 作業布の上の容器
+  if (w.mat && !hide('mat')) {
+    const b = bottleEl(w.mat, { live: true }); b.dataset.w = 'mat-bottle'; b.classList.add('onmat');
+    if (w.mat.rinse >= 1 && w.mat.wipe >= 1 && !st3) b.classList.add('shine');
+    place(root, b, MAT_POS.x, MAT_POS.y);
+  }
+  // 消えていく物
+  for (let i = WFX.length - 1; i >= 0; i--) {
+    const f = WFX[i], age = fxAge(f);
+    if (age > f.dur) { WFX.splice(i, 1); continue; }
+    let e;
+    if (f.k === 'tag') { e = wimg('tag', 'fx-tag'); e.style.setProperty('--dx', f.dx + 'px'); e.style.setProperty('--dy', f.dy + 'px'); }
+    else if (f.k === 'spark') e = el('div', 'fx-spark');
+    else if (f.k === 'box') {
+      e = el('div', 'fx-box'); e.appendChild(wimg('cbox_back', 'x-back'));
+      f.kinds.forEach((k, j) => { const q = boxPos(j); place(e, bottleEl(cleanOf(k, true)), q.x - WL.cbox.x, q.y - WL.cbox.y); });
+      e.appendChild(wimg('cbox_front', 'x-front')); e.appendChild(wimg('cbox_lid', 'x-lid'));
+    }
+    e.style.animationDelay = -age + 's'; if (e.firstChild && f.k === 'box') e.querySelector('.x-lid').style.animationDelay = -age + 's';
+    place(root, e, f.x, f.y);
+  }
+  // ドラッグ中の物
+  if (d && d.what !== 'none') washDragNode(root);
+}
+
+/* ---------- 操作 ---------- */
+let wdrag = null;   // { what, from, idx, item, kind, off, node, ... }
+function washHit(e) {
+  for (const x of document.elementsFromPoint(e.clientX, e.clientY)) {
+    if (x.closest('#hand') || x.closest('#popup')) continue;
+    const n = x.closest('[data-w]'); if (n && $('#table').contains(n)) return n.dataset.w;
+    if (x.id === 'table') return null;
+  }
+  return null;
+}
+function washDown(e) {
+  if (wdrag) return;
+  press = { wash: true, x: e.clientX, y: e.clientY, button: e.button, w: washHit(e), drag: false };
+}
+function washMove(e) {
+  const pr = press;
+  if (S.paused) return;
+  if (!pr.drag) {
+    if (pr.button !== 0 || Math.hypot(e.clientX - pr.x, e.clientY - pr.y) < OPT.drag) return;
+    pr.drag = true;
+    const r = $('#table').getBoundingClientRect();
+    beginWashDrag(pr.w, { x: (pr.x - r.left) / scale, y: (pr.y - r.top) / scale });
+  }
+  if (wdrag) moveWashDrag(tablePoint(e));
+}
+function washUp(pr, e) {
+  if (pr.drag) { if (wdrag) endWashDrag(tablePoint(e)); return; }
+  if (!pr.w) return;
+  const key = pr.w.split(':')[0];
+  if (pr.button === 2) { popup(washDesc(key), e.clientX, e.clientY); return; }
+  // クリックで済む運び（回収箱→作業布、乾燥棚→作業布）
+  const w = W();
+  if (key === 'rbox' && w.stage === 1 && !w.mat) { w.mat = { kind: randKind(), tag: true, cork: true, rinse: 0, wipe: 0 }; SFX.clink(); dirty(); }
+  else if (key === 'rack' && w.stage === 3 && !w.mat) { const i = +pr.w.split(':')[1]; if (w.rack[i]) { w.mat = cleanOf(w.rack[i], false); w.rack[i] = null; SFX.clink(); rackEmptied(); dirty(); } }
+}
+function washDesc(key) {
+  if (key === 'mat-bottle') {
+    const m = W().mat; const nm = m.kind === 'gel' ? '回復ジェルの容器' : '霊薬の容器';
+    return W().stage === 3 ? `${nm}：${m.cork ? '仮置き台へ' : '合う栓を付ける'}` : `${nm}：${m.tag || m.cork ? 'タグと栓を外す' : m.rinse < 1 ? '桶に入れて左右に振る' : m.wipe < 1 ? '布でこすって拭く' : '乾燥棚へ'}`;
+  }
+  return WDESC[key] || '';
+}
+function beginWashDrag(hit, p) {
+  const w = W(); if (!hit) return;
+  const [key, si] = hit.split(':'), i = si != null ? +si : null;
+  const st3 = w.stage === 3, m = w.mat;
+  let d = null;
+  if (key === 'rbox' && !st3 && !m) d = { what: 'bottle', from: 'rbox', item: { kind: randKind(), tag: true, cork: true, rinse: 0, wipe: 0 }, off: { x: WBW / 2, y: WBH / 2 } };
+  else if (key === 'tag' && m && m.tag) { const tx = MAT_POS.x + WB_TAG[m.kind][0] * WK, ty = MAT_POS.y + WB_TAG[m.kind][1] * WK; d = { what: 'tag', sx: p.x, sy: p.y, ox: tx, oy: ty, kind: m.kind }; }
+  else if (key === 'cork' && m && m.cork && !st3) { const cx = MAT_POS.x + WB_CORK[m.kind][0] * WK, cy = MAT_POS.y + WB_CORK[m.kind][1] * WK; d = { what: 'cork', sx: p.x, sy: p.y, ox: cx, oy: cy, kind: m.kind, pulled: false, off: { x: p.x - cx, y: p.y - cy } }; }
+  else if (key === 'mat-bottle' && m) {
+    if (!st3 && (m.tag || m.cork)) { SFX.deny(); wiggle(); return; }
+    d = { what: 'bottle', from: 'mat', item: m, off: { x: p.x - MAT_POS.x, y: p.y - MAT_POS.y } };
+  } else if (key === 'rack' && st3 && w.rack[i]) d = { what: 'bottle', from: 'rack', idx: i, item: cleanOf(w.rack[i], false), off: { x: WBW / 2, y: WBH / 2 } };
+  else if (key === 'temp' && st3 && w.temp[i]) d = { what: 'bottle', from: 'temp', idx: i, item: cleanOf(w.temp[i], true), off: { x: WBW / 2, y: WBH / 2 } };
+  else if (key === 'tray' && st3 && w.tray[i]) d = { what: 'trayCork', from: 'tray', idx: i, kind: w.tray[i], off: { x: CORK_SZ[w.tray[i]][0] * WK / 2, y: CORK_SZ[w.tray[i]][1] * WK / 2 } };
+  else if (key === 'cloth') d = { what: 'cloth', from: 'cloth', off: { x: p.x - WL.cloth.x, y: p.y - WL.cloth.y }, last: p };
+  if (!d) return;
+  d.x = p.x - (d.off ? d.off.x : 0); d.y = p.y - (d.off ? d.off.y : 0);
+  if (d.what === 'tag' || d.what === 'cork') { d.x = d.ox; d.y = d.oy; }
+  d.last = p; d.dist = 0;
+  wdrag = d; SFX.grab(); renderTable();
+}
+function wiggle() { const n = document.querySelectorAll('#table .onmat .wtag, #table .onmat .wcork'); n.forEach(x => { x.classList.remove('wiggle'); void x.offsetWidth; x.classList.add('wiggle'); }); }
+function washDragNode(root) {
+  const d = wdrag;
+  let e;
+  if (d.what === 'bottle') e = bottleEl(d.item);
+  else if (d.what === 'trayCork' || d.what === 'cork') e = corkEl(d.kind);
+  else if (d.what === 'tag') e = wimg('tag');
+  else if (d.what === 'cloth') e = wimg('cloth');
+  e.classList.add('wdrag', 'wd-' + d.what);
+  if (d.what === 'tag') {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('class', 'wstring'); svg.setAttribute('width', TW); svg.setAttribute('height', TH);
+    const ln = document.createElementNS('http://www.w3.org/2000/svg', 'line'); svg.appendChild(ln); root.appendChild(svg); d.line = ln;
+  }
+  d.node = e; d.dipped = false; root.appendChild(e);
+  posDrag();
+}
+function posDrag() {
+  const d = wdrag, e = d.node; if (!e) return;
+  if (d.dipped) { e.style.left = d.x - WL.bucket.x + 'px'; e.style.top = -10 + 'px'; }
+  else { e.style.left = d.x + 'px'; e.style.top = d.y + 'px'; }
+  if (d.line) { const nx = d.ox + 2, ny = d.oy + 2; d.line.setAttribute('x1', nx - (d.x - d.ox)); d.line.setAttribute('y1', ny - (d.y - d.oy)); d.line.setAttribute('x2', d.x + 3); d.line.setAttribute('y2', d.y + 3); }
+}
+const inBucket = p => p.x > WL.bucket.x + 14 && p.x < WL.bucket.x + WL.bucket.w - 14 && p.y > WL.bucket.y && p.y < WL.bucket.y + 110;
+let sndAt = 0;
+function moveWashDrag(p) {
+  const d = wdrag, w = W();
+  if (d.what === 'none') return;
+  const dx = p.x - d.last.x, dy = p.y - d.last.y; d.last = p;
+  if (d.what === 'tag') {
+    const ddx = p.x - d.sx, ddy = p.y - d.sy, dist = Math.hypot(ddx, ddy);
+    // 糸が張るまでは少しだけ動き、張りきると切れて外れる
+    const k = Math.min(1, dist / 46) * 0.6;
+    d.x = d.ox + ddx * k; d.y = d.oy + ddy * k;
+    if (dist > 46) {
+      w.mat.tag = false;
+      const n = Math.max(1, dist);
+      WFX.push({ k: 'tag', at: performance.now(), dur: 0.7, x: d.x, y: d.y, dx: ddx / n * 26, dy: ddy / n * 26 });
+      SFX.paper(); d.what = 'none'; if (d.line) d.line.remove(); d.line = null; dirty(); return;
+    }
+    posDrag(); return;
+  }
+  if (d.what === 'cork') {
+    const ddx = p.x - d.sx, ddy = p.y - d.sy;
+    if (!d.pulled) {
+      d.x = d.ox + ddx * 0.25; d.y = d.oy + ddy * 0.25;
+      if (Math.hypot(ddx, ddy) > 34) { d.pulled = true; w.mat.cork = false; SFX.pop(); const b = document.querySelector('#table .onmat .wcork'); if (b) b.remove(); }
+    } else { d.x = p.x - d.off.x; d.y = p.y - d.off.y; }
+    posDrag(); return;
+  }
+  d.x = p.x - d.off.x; d.y = p.y - d.off.y;
+  if (d.what === 'bottle' && d.from === 'mat' && w.stage === 1) {
+    const inB = inBucket(p);
+    if (inB !== d.dipped) {
+      d.dipped = inB;
+      if (inB) { const bk = document.querySelector('#table .wbucket'); bk.insertBefore(d.node, bk.querySelector('.b-water')); d.node.classList.add('dipped'); SFX.splash(); }
+      else { $('#table').appendChild(d.node); d.node.classList.remove('dipped'); }
+    }
+    if (inB) {
+      d.x = clamp(d.x, WL.bucket.x + 18, WL.bucket.x + WL.bucket.w - 18 - WBW);
+      const it = d.item;
+      if (it.rinse < 1) {
+        it.rinse = Math.min(1, it.rinse + Math.abs(dx) / V2.NAISHOKU.rinse);
+        const g = d.node.querySelector('.grime'); if (g) g.style.opacity = 1 - it.rinse;
+        d.dist += Math.abs(dx);
+        if (d.dist > 70) { d.dist = 0; bubble(d.x + WBW / 2 - WL.bucket.x); if (performance.now() - sndAt > 140) { sndAt = performance.now(); SFX.splash(); } }
+        if (it.rinse >= 1) { SFX.sparkle(); bubble(d.x + WBW / 2 - WL.bucket.x, true); refreshHint(); }
+      }
+    }
+  }
+  if (d.what === 'cloth' && w.mat && w.stage === 1 && w.mat.rinse >= 1 && w.mat.wipe < 1 && !d.dipped) {
+    const r = { x: d.x, y: d.y, w: WL.cloth.w, h: WL.cloth.h }, b = { x: MAT_POS.x + 4, y: MAT_POS.y + 16, w: WBW - 8, h: WBH - 16 };
+    if (overlap(r, b)) {
+      const m = Math.hypot(dx, dy);
+      w.mat.wipe = Math.min(1, w.mat.wipe + m / V2.NAISHOKU.wipe);
+      const dr = document.querySelector('#table .onmat .drops'); if (dr) dr.style.opacity = 1 - w.mat.wipe;
+      d.dist += m;
+      if (d.dist > 40 && performance.now() - sndAt > 110) { d.dist = 0; sndAt = performance.now(); SFX.rub(); }
+      if (w.mat.wipe >= 1) { SFX.sparkle(); WFX.push({ k: 'spark', at: performance.now(), dur: 0.8, x: MAT_POS.x + 8, y: MAT_POS.y + 14 }); dirty(); }
+    }
+  }
+  posDrag();
+}
+function bubble(x, big) {
+  const bk = document.querySelector('#table .wbucket'); if (!bk) return;
+  for (let n = 0; n < (big ? 5 : 2); n++) {
+    const b = el('div', 'fx-bubble'); b.style.left = x + randi(-16, 16) + 'px'; b.style.top = randi(18, 30) + 'px';
+    bk.appendChild(b); setTimeout(() => b.remove(), 700);
+  }
+}
+function endWashDrag(p) {
+  const d = wdrag, w = W(); wdrag = null;
+  if (d.line) d.line.remove();
+  const it = d.item;
+  const over = r => inRect(p, r);
+  if (d.what === 'bottle') {
+    if (d.from === 'rbox') { if (over(WL.mat) && !w.mat) { w.mat = it; SFX.clink(); } else SFX.soft(); }
+    else if (d.from === 'mat') {
+      if (w.stage === 1) {
+        if (it.wipe >= 1 && over(WL.rack)) {
+          let i = nearest(10, rackPos, p, j => !w.rack[j]);
+          if (i >= 0) { w.rack[i] = it.kind; w.mat = null; SFX.clink(); if (w.rack.every(Boolean)) toStage3(); }
+        } else SFX.soft();
+      } else {
+        if (it.cork && over(WL.temp)) { const i = nearest(10, tempPos, p, j => !w.temp[j]); if (i >= 0) { w.temp[i] = it.kind; w.mat = null; SFX.clink(); } }
+        else if (it.cork && boxOpen() && over(WL.cbox)) { w.mat = null; putInBox(it.kind); }
+        else if (!it.cork && over(WL.rack) && !boxOpen()) { const i = nearest(10, rackPos, p, j => !w.rack[j]); if (i >= 0) { w.rack[i] = it.kind; w.mat = null; SFX.clink(); } }
+        else SFX.soft();
+      }
+    } else if (d.from === 'rack') {
+      if (over(WL.mat) && !w.mat) { w.mat = it; w.rack[d.idx] = null; SFX.clink(); rackEmptied(); }
+      else if (over(WL.rack)) { const i = nearest(10, rackPos, p, j => !w.rack[j] || j === d.idx); if (i >= 0 && i !== d.idx) { w.rack[i] = w.rack[d.idx]; w.rack[d.idx] = null; } SFX.soft(); }
+      else SFX.soft();
+    } else if (d.from === 'temp') {
+      if (boxOpen() && over(WL.cbox)) { w.temp[d.idx] = null; putInBox(it.kind); }
+      else if (over(WL.temp)) { const i = nearest(10, tempPos, p, j => !w.temp[j] || j === d.idx); if (i >= 0 && i !== d.idx) { w.temp[i] = w.temp[d.idx]; w.temp[d.idx] = null; } SFX.soft(); }
+      else SFX.soft();
+    }
+  } else if (d.what === 'cork') {
+    if (d.pulled) {
+      let i = -1;
+      if (over(WL.tray)) for (let j = 0; j < 10; j++) if (!w.tray[j] && inRect(p, trayCell(j))) i = j;
+      if (i < 0) i = w.tray.indexOf(null);
+      if (i >= 0) w.tray[i] = d.kind;
+      SFX.soft();
+    }
+  } else if (d.what === 'trayCork') {
+    const m = w.mat, b = { x: MAT_POS.x - 10, y: MAT_POS.y - 10, w: WBW + 20, h: WBH + 20 };
+    if (m && !m.cork && inRect(p, b)) {
+      if (m.kind === d.kind) { m.cork = true; w.tray[d.idx] = null; SFX.pop(); }
+      else { SFX.buzz(); requestAnimationFrame(() => { const n = document.querySelector('#table .onmat'); if (n) n.classList.add('shake'); }); }
+    } else if (over(WL.tray)) {
+      let i = -1; for (let j = 0; j < 10; j++) if (inRect(p, trayCell(j)) && !w.tray[j]) i = j;
+      if (i >= 0) { w.tray[i] = w.tray[d.idx]; w.tray[d.idx] = null; }
+      SFX.soft();
+    } else SFX.soft();
+  } else if (d.what === 'cloth') SFX.soft();
+  dirty();
+}
+// 中断：持っている物は元の場所へ（途中までの洗い具合はそのまま）
+function cancelWashDrag() {
+  if (!wdrag) return;
+  const d = wdrag; wdrag = null;
+  if (d.line) d.line.remove();
+  if (d.what === 'cork' && d.pulled) { const i = W().tray.indexOf(null); if (i >= 0) W().tray[i] = d.kind; }
+  if (press && press.wash) press = null;
+  dirty();
+}
+function rackEmptied() { if (boxOpen()) { SFX.creak(); toast('乾燥棚が空きました。乾燥棚を片付けて、箱を出しました'); } }
+const refreshHint = () => { const h = document.querySelector('#table .p-hint'); if (h) h.textContent = washHint(); };
+function toStage3() {
+  W().stage = 3;
+  SFX.good(); toast('乾燥棚が埋まりました。栓をして箱に詰めます');
+}
+function putInBox(kind) {
+  const w = W();
+  w.box.push(kind); SFX.clink();
+  if (w.box.length < 10) return;
+  // 最後の1本で箱が閉じる
+  const g = V2.NAISHOKU.reward;
+  WFX.push({ k: 'box', at: performance.now(), dur: 1.9, x: WL.cbox.x, y: WL.cbox.y, kinds: w.box.slice() });
+  S.gold += g; S.stats.incomeSide += g; S.stats.washBoxes++;
+  setTimeout(() => SFX.thump(), 380); setTimeout(() => SFX.coin(), 700);
+  toast(`内職：容器10本を箱に詰めました　手間賃 +${g}G`, 'good');
+  clerkFace('happy', 1.6);
+  S.wash = Object.assign(newWash(), { cycles: w.cycles + 1 });
 }
 
 /* ================= オプション（訪問頻度） ================= */
@@ -1135,7 +1563,7 @@ function renderOptions() {
   $('#optDrag').textContent = OPT.drag + 'px';
   $('#optVisitNote').textContent = `来訪の間隔：平均 約${Math.round((CFG.ARRIVAL_GAP[0] + CFG.ARRIVAL_GAP[1]) / 2 / OPT.visit)}分（ゲーム内）`;
 }
-function setPaused(v) { if (!busy()) v = false; S.paused = v; $('#pauseOv').hidden = !v; if (v) { $('#optBox').hidden = true; $('#pauseMain').hidden = false; } }
+function setPaused(v) { if (!busy()) v = false; if (v) cancelWashDrag(); S.paused = v; $('#pauseOv').hidden = !v; if (v) { $('#optBox').hidden = true; $('#pauseMain').hidden = false; } }
 
 /* ================= 起動 ================= */
 let MANUAL = [];
@@ -1148,6 +1576,8 @@ function setup() {
   MANUAL = manualPages();
   const faces = $('#clerkFaces');
   for (const f of ['eyeopen', 'blink_1', 'blink_2', 'happy', 'sad', 'rest']) { const im = el('img', 'px'); im.src = CLERK_DIR + 'clerk_' + f + '.png'; im.dataset.face = f; im.alt = '受付嬢'; im.hidden = f !== 'eyeopen'; faces.appendChild(im); }
+  faces.title = '個人用テーブルを開く';
+  faces.addEventListener('click', () => { SFX.init(); openPersonal(); });
   const booths = $('#booths');
   for (let i = 0; i < CFG.SLOTS; i++) {
     const r = el('div', 'booth'); r.style.left = (12 + i * 211) + 'px';
@@ -1205,5 +1635,5 @@ function frame(t) {
 Promise.all([loadImg('adv', 'img/adventurers.png'), loadImg('bandage', 'img/bandage.png')]).then(() => { setup(); requestAnimationFrame(frame); });
 
 // 動作確認用
-window.__v2 = { S, update, dirty, knowable, hasDocDefect, finishReception, tbl, startDay, toNight, nextDay, selectTable };
+window.__v2 = { S, update, dirty, knowable, hasDocDefect, finishReception, tbl, startDay, toNight, nextDay, selectTable, openPersonal, stepSet, newWash };
 })();
