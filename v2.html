@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GuildClerkWorkGame v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="v2/css/style2.css">
+</head>
+<body>
+<div id="stage">
+  <header id="topbar">
+    <div class="brand">冒険者ギルド　受付</div>
+    <div class="tb-item" id="tbDay">1日目</div>
+    <div class="tb-date" id="tbDate"></div>
+    <div class="tb-clock" id="tbClock">06:00</div>
+    <div class="tb-status" id="tbStatus">開店前</div>
+    <div class="tb-gold">支店運営費 <b id="tbGold">0</b> G</div>
+    <div class="tb-queue" id="queueInfo"></div>
+    <div class="spacer"></div>
+    <button class="tb-btn" id="btnSound">音 入</button>
+    <button class="tb-btn" id="btnPause">一時停止 <small>P</small></button>
+  </header>
+
+  <section id="lobby">
+    <div id="booths"></div>
+    <div id="dayCtl" hidden>
+      <div id="dayCtlText"></div>
+      <button class="btn go" id="btnDay">営業開始</button>
+    </div>
+  </section>
+
+  <section id="work">
+    <div id="clerkPanel">
+      <div id="log" aria-live="polite"><div class="log-h">連絡</div><div id="logList"></div></div>
+      <img id="clerkImg" class="px" src="img/newGraphic(clerk)/clerk_eyeopen.png" alt="受付嬢">
+    </div>
+    <div id="table"></div>
+    <div id="equip">
+      <div class="eq-head">
+        <button class="eq-arrow" id="eqPrev" aria-label="前の設備">◀</button>
+        <span id="eqName">物品棚</span>
+        <button class="eq-arrow" id="eqNext" aria-label="次の設備">▶</button>
+      </div>
+      <div id="eqBody"></div>
+      <div class="eq-keys">A / D・← / → で切り替え</div>
+    </div>
+  </section>
+
+  <div id="titleOv" class="overlay">
+    <div class="panel title-panel">
+      <div class="title-logo">GuildClerkWorkGame</div>
+      <div class="title-sub">v2（テーブルの基盤の版）</div>
+      <img class="px title-clerk" src="img/newGraphic(clerk)/clerk_eyeopen.png" alt="">
+      <ul class="title-list">
+        <li>上のテーブルをクリックして切り替える。テーブルを移ると、出していた鞄や棚の物はしまわれる</li>
+        <li>紙・本・小物はドラッグで動かせる。小物と道具は左クリックで持ち、右クリックで置く（道具は戻る）</li>
+        <li>本は左右クリックかホイールでめくる。右クリックで小物や道具の説明が出る</li>
+        <li>対応マニュアルとタグの束は、右の設備窓の「鞄」に入っている</li>
+      </ul>
+      <button class="btn primary" id="btnContinue" hidden>続きから</button>
+      <button class="btn primary" id="btnStart">営業を始める</button>
+    </div>
+  </div>
+
+  <div id="reportOv" class="overlay" hidden>
+    <div class="panel report-panel">
+      <h2 id="repTitle">営業成績</h2>
+      <div id="repBody"></div>
+      <button class="btn primary" id="btnNextDay">業務を終える</button>
+    </div>
+  </div>
+
+  <div id="pauseOv" class="overlay" hidden>
+    <div class="panel pause-panel">
+      <div id="pauseMain">
+        <h2>一時停止中</h2>
+        <p>時間は止まっています。</p>
+        <button class="btn primary" id="btnResume">再開する <small>P</small></button>
+        <button class="btn secondary" id="btnOptions">オプション</button>
+      </div>
+      <div id="optBox" hidden>
+        <h2>オプション</h2>
+        <h3 class="opt-h">デバッグ</h3>
+        <div class="opt-row">
+          <span class="opt-k">訪問頻度</span>
+          <button class="btn small" id="optVisitDown">－</button>
+          <b id="optVisit">×1.0</b>
+          <button class="btn small" id="optVisitUp">＋</button>
+          <button class="btn small" id="optVisitReset">標準</button>
+        </div>
+        <p class="opt-note" id="optVisitNote"></p>
+        <button class="btn primary" id="btnOptBack">戻る</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="scene"></div>
+  <div id="popup" hidden></div>
+  <div id="hand" hidden></div>
+</div>
+
+<script src="js/adv_meta.js"></script>
+<script src="js/data.js"></script>
+<script src="js/sound.js"></script>
+<script src="v2/js/data2.js"></script>
+<script src="v2/js/game2.js"></script>
+</body>
+</html>
