@@ -60,7 +60,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .logline.good { color: #6a4a00; } .logline.bad { color: var(--bad); }
 .logline.new { animation: flash 1.2s steps(6); }
 @keyframes flash { 0%, 50% { background: #ffe9a8; } }
-#clerkImg { position: absolute; left: 4px; bottom: 0; width: 192px; height: 192px; }
+#clerkFaces img { position: absolute; left: 4px; bottom: 0; width: 192px; height: 192px; }
 
 /* テーブル */
 #table { position: absolute; left: 200px; top: 0; width: 800px; height: 484px; overflow: hidden; touch-action: none;
@@ -80,7 +80,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .q-row { display: flex; justify-content: space-between; font-size: 13px; }
 .q-req { font-size: 10px; color: var(--ink-soft); margin-top: 2px; }
 .q-sig { position: absolute; left: 10px; right: 10px; bottom: 8px; height: 24px; border: 1px dashed #6b4a36; font-size: 10px; color: var(--ink-soft); padding: 1px 4px; }
-.q-sig .sig { position: absolute; right: 8px; top: 2px; font-size: 15px; color: #2a3a8a; transform: rotate(-6deg); }
+.q-sig .sig { position: absolute; right: 6px; top: 2px; max-width: 120px; overflow: hidden; white-space: nowrap; font-size: 14px; color: #2a3a8a; transform: rotate(-6deg); }
 .q-orig { position: absolute; right: 8px; top: 30px; font-size: 10px; color: #8a6a40; }
 .doc-card { width: 214px; height: 118px; padding: 4px 8px; background: #e8eef4; border-color: #4a5a6a; border-radius: 8px; }
 .c-head { font-size: 10px; color: #4a5a6a; border-bottom: 1px solid #4a5a6a; }
@@ -88,13 +88,14 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .photo { width: 60px; height: 60px; border: 2px solid #4a5a6a; }
 .c-info { font-size: 12px; line-height: 1.45; }
 .c-name { font-size: 14px; }
-.c-exp { font-size: 11px; color: #2a3a5a; }
+.c-exp { font-size: 11px; color: #2a3a5a; white-space: nowrap; }
 .doc-apply, .doc-pform { width: 196px; height: 250px; background: #fffaf0; }
 .f-title { font-size: 15px; text-align: center; border-bottom: 2px solid #6b4a36; margin-bottom: 4px; }
 .f-sub { font-size: 11px; color: var(--ink-soft); }
-.f-reason { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 3px 2px; }
-.f-reason .box { width: 14px; height: 14px; border: 2px solid #2a1c14; background: #fff; position: relative; }
-.f-reason.on .box::after { content: "✓"; position: absolute; left: 0; top: -6px; font-size: 16px; color: #1a2a8a; }
+.f-reason { display: flex; align-items: center; gap: 8px; font-size: 14px; padding: 4px 2px; }
+.f-reason .box { width: 18px; height: 18px; border: 2px solid #2a1c14; background: #fff; position: relative; flex: none; }
+.f-reason.on .box::after { content: ""; position: absolute; left: 4px; top: -6px; width: 7px; height: 16px; border-right: 4px solid #c0392b; border-bottom: 4px solid #c0392b; transform: rotate(40deg); }
+.f-reason.on { color: #8a1e14; }
 .f-boxes { display: flex; gap: 6px; margin-top: 8px; }
 .f-box { flex: 1; height: 78px; border: 2px solid #6b4a36; font-size: 10px; color: var(--ink-soft); padding: 2px 4px; }
 .doc-order { width: 196px; height: 206px; background: #fffaf0; }
@@ -128,7 +129,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .small .tg { position: absolute; right: -6px; bottom: -6px; width: 24px; height: 24px; }
 .tool { background: rgba(28, 17, 11, .18); border-radius: 6px; }
 .tlab { position: absolute; right: -4px; bottom: -4px; min-width: 20px; padding: 0 3px; font-size: 12px; text-align: center; color: #fff; background: #6a4a3a; border: 2px solid #1c110b; }
-.tlab.approve { background: #2f7a3a; } .tlab.reject { background: var(--bad); } .tlab.seal { background: #b0302a; }
+.tlab.approve { background: #2f7a3a; } .tlab.reject { background: var(--bad); } .tlab.seal { background: #2d4a8a; color: #f2c64a; } .tlab.q { background: #6a6a74; }
 /* 備品の置き場 */
 .fix { position: absolute; border: 3px solid #1c110b; }
 .tray { background: #5a3e2e; cursor: pointer; }
@@ -157,21 +158,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .scell { width: 40px; height: 40px; background: rgba(255, 255, 255, .05); border: 1px solid rgba(255, 255, 255, .08); display: flex; align-items: center; justify-content: center; cursor: pointer; }
 .scell img { width: 34px; height: 34px; }
 .scell:not(.empty):hover { outline: 2px solid var(--sel); }
-.foot { display: flex; gap: 6px; margin-top: 10px; align-items: flex-end; }
-.fslot { width: 62px; height: 92px; border: 2px dashed rgba(255, 255, 255, .15); display: flex; align-items: flex-end; justify-content: center; }
-.etrash { width: 52px; height: 74px; position: relative; background: #3a3a40; border: 2px solid #1c110b; color: #ddd; font-size: 10px; text-align: center; }
-.etrash .trash-can { left: 9px; right: 9px; top: 8px; height: 38px; }
-.etrash span { position: absolute; left: 0; right: 0; bottom: 4px; }
-.box { position: relative; width: 60px; height: 84px; cursor: pointer; }
-.box-img { position: absolute; left: 0; bottom: 0; width: 60px; height: 60px; }
-.box-inner { position: absolute; left: 10px; right: 10px; bottom: 30px; height: 20px; display: flex; flex-wrap: wrap-reverse; justify-content: center; align-content: flex-start; gap: 0; overflow: hidden; }
-.box-inner img { width: 14px; height: 14px; margin: -2px -2px 0; }
-.box.closed .box-inner { display: none; }
-.box-label { position: absolute; left: 20px; bottom: 10px; width: 20px; height: 20px; background: #f6ecd2; border: 1px solid #1c110b; }
-.box-n { position: absolute; left: 0; right: 0; top: 0; text-align: center; font-size: 11px; color: #f6ecd2; text-shadow: 0 2px 0 #1c110b; }
 .stockgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; padding: 6px; background: #3a3a40; border: 3px solid #1c110b; box-shadow: inset 0 -6px 0 #5a5a64; }
-.stslot { height: 74px; background: rgba(255, 255, 255, .04); border: 1px dashed rgba(255, 255, 255, .15); display: flex; align-items: flex-end; justify-content: center; }
-.stslot .box { height: 72px; }
+.stslot { height: 82px; background: rgba(255, 255, 255, .04); border: 1px dashed rgba(255, 255, 255, .15); display: flex; align-items: flex-end; justify-content: center; }
 .bag { min-height: 300px; padding: 12px; background: #7a4e2e; border: 4px solid #1c110b; border-radius: 20px 20px 8px 8px; display: flex; flex-wrap: wrap; gap: 12px; align-content: flex-start; }
 .bag-item { width: 108px; height: 110px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; background: rgba(0, 0, 0, .15); border: 2px solid #1c110b; color: #f6ecd2; font-size: 12px; cursor: pointer; }
 .bag-item img { width: 56px; height: 56px; }
@@ -181,7 +169,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .mail-body { position: absolute; left: 0; right: 0; top: 110px; text-align: center; color: #f6ecd2; font-size: 20px; }
 
 /* 重ね表示 */
-.overlay { position: absolute; inset: 0; background: rgba(14, 9, 6, .72); z-index: 20; display: flex; align-items: center; justify-content: center; }
+.overlay { position: absolute; inset: 0; background: rgba(14, 9, 6, .72); z-index: 60; display: flex; align-items: center; justify-content: center; }
 .overlay[hidden] { display: none; }
 .panel { background: var(--paper); border: 4px solid #1c110b; box-shadow: 6px 6px 0 rgba(0, 0, 0, .4); padding: 22px 28px; max-height: 680px; overflow: auto; }
 .panel h2 { margin: 0 0 12px; font-weight: normal; font-size: 24px; text-align: center; }
@@ -208,3 +196,30 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #scene.show { animation: scene 2s steps(20) forwards; visibility: visible; }
 @keyframes scene { 0% { opacity: 0; transform: scaleY(.2); } 12% { opacity: 1; transform: none; } 75% { opacity: 1; } 100% { opacity: 0; } }
 .sc-t { font-size: 32px; color: #f6ecd2; letter-spacing: .12em; } .sc-s { font-size: 15px; color: var(--gold); margin-top: 4px; }
+
+/* 重なり順：テーブルと設備窓はそれぞれの中で完結させ、手は常に手前（重ね表示よりは後ろ） */
+#table, #equip { z-index: 1; isolation: isolate; }
+#hand { z-index: 40; } #popup { z-index: 45; } .ghost { z-index: 40; } #scene { z-index: 50; }
+.paper { overflow: hidden; }
+.obj.fading { animation: docfade 1.2s ease-in forwards; pointer-events: none; }
+.obj.fading .half { pointer-events: none; }
+@keyframes docfade { to { opacity: 0; transform: translateY(-26px); } }
+/* 箱（奥・中の品・手前の3層。素材の2倍で表示） */
+.box { position: relative; cursor: pointer; }
+.box-pouch { width: 60px; height: 52px; } .box-crate_s { width: 68px; height: 56px; } .box-crate_l { width: 84px; height: 60px; }
+.box-back, .box-front { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+.box-inner { position: absolute; inset: 0; }
+.box-inner img { position: absolute; width: 16px; height: 16px; }
+.box-label { position: absolute; left: 50%; bottom: 8px; width: 20px; height: 20px; margin-left: -10px; }
+.box-n { position: absolute; left: -10px; right: -10px; top: -15px; text-align: center; font-size: 10px; color: #f6ecd2; text-shadow: 0 2px 0 #1c110b; white-space: nowrap; }
+.foot { display: flex; gap: 3px; margin-top: 18px; }
+.fslot { flex: 1; height: 82px; border: 2px dashed rgba(255, 255, 255, .15); display: flex; align-items: flex-end; justify-content: center; padding-bottom: 2px; }
+.shelf-bottom { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.etrash { width: 46px; height: 46px; position: relative; background: #3a3a40; border: 2px solid #1c110b; flex: none; }
+.etrash .trash-can { position: absolute; left: 10px; right: 10px; top: 5px; height: 24px; background: #7a7a84; border: 2px solid #2a2a30; border-top-width: 4px; }
+.etrash span { position: absolute; left: 0; right: 0; bottom: 1px; font-size: 9px; color: #ddd; text-align: center; }
+.stslot { align-items: flex-end; padding-bottom: 2px; }
+.m-h { margin: 6px 0 1px !important; color: #8a4a1e; }
+.m-list { margin: 1px 0 3px; padding-left: 1.1em; }
+.book-manual .half { font-size: 11px; line-height: 1.5; }
+.m-months { margin: 2px 0; }

@@ -35,7 +35,7 @@
   <section id="work">
     <div id="clerkPanel">
       <div id="log" aria-live="polite"><div class="log-h">連絡</div><div id="logList"></div></div>
-      <img id="clerkImg" class="px" src="img/newGraphic(clerk)/clerk_eyeopen.png" alt="受付嬢">
+      <div id="clerkFaces"></div>
     </div>
     <div id="table"></div>
     <div id="equip">
@@ -92,6 +92,14 @@
           <button class="btn small" id="optVisitReset">標準</button>
         </div>
         <p class="opt-note" id="optVisitNote"></p>
+        <div class="opt-row">
+          <span class="opt-k">クリックとドラッグの境目</span>
+          <button class="btn small" id="optDragDown">－</button>
+          <b id="optDrag">5px</b>
+          <button class="btn small" id="optDragUp">＋</button>
+          <button class="btn small" id="optDragReset">標準</button>
+        </div>
+        <p class="opt-note">ボタンを押してから、この距離以上動かすとドラッグになります。</p>
         <button class="btn primary" id="btnOptBack">戻る</button>
       </div>
     </div>

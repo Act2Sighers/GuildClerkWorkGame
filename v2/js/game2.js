@@ -41,7 +41,7 @@ const TOOL_DEF = {
   q10: { name: '数量ハンコ「10」', desc: '注文用紙の品の枠に押す', home: [504, 414] },
 };
 const PAPER = { quest: [196, 262], card: [214, 118], apply: [196, 250], pform: [196, 250], order: [196, 206] };
-const BOOK = { roster: [140, 190], manual: [196, 262] };
+const BOOK = { roster: [140, 190], manual: [212, 336] };
 const SMALL_DESC = {
   gel: '回復ジェル（ギルド支給品）。負傷した人に渡す',
   elixir: '霊薬（ギルド支給品）。幽霊になった人に渡す',
@@ -87,13 +87,15 @@ function addObj(t, o) { o.id = S.seq++; if (o.cls === 'paper' || o.cls === 'book
 function makeTools(t) {
   for (const [k, d] of Object.entries(TOOL_DEF)) addObj(t, { cls: 'tool', tool: k, x: d.home[0], y: d.home[1], face: 'approve' });
 }
+const nightOnly = o => (o.cls === 'tool' && o.tool[0] === 'q') || o.doc === 'order';
+const hiddenNow = o => nightOnly(o) && S.phase !== 'night';
 const objW = o => o.cls === 'small' || o.cls === 'tool' ? SM : o.cls === 'book' ? BOOK[o.book][0] * 2 : PAPER[o.doc][0];
 const objH = o => o.cls === 'small' || o.cls === 'tool' ? SM : o.cls === 'book' ? BOOK[o.book][1] : PAPER[o.doc][1];
 const rectOf = o => ({ x: o.x, y: o.y, w: objW(o), h: objH(o) });
 const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 function obstacles(t, except) {
-  const r = t.objs.filter(o => (o.cls === 'small' || o.cls === 'tool') && !o.held && o !== except).map(rectOf);
-  for (const f of Object.values(FIX)) r.push({ x: f.x, y: f.y, w: f.w, h: f.h });
+  const r = t.objs.filter(o => (o.cls === 'small' || o.cls === 'tool') && !o.held && o !== except && !hiddenNow(o)).map(rectOf);
+  for (const [k, f] of Object.entries(FIX)) if (k !== 'order' || S.phase === 'night') r.push({ x: f.x, y: f.y, w: f.w, h: f.h });
   return r;
 }
 // 小物・道具は重ならないように置き直す
@@ -215,7 +217,7 @@ function genParty() {
   const q = best.quest;
   q.phrase = fillPhrase(pick(QUEST_PHRASES[q.type]), q.diff);
   q.title = pick(Math.random() < 0.4 ? QUEST_TITLES2.共通 : QUEST_TITLES2[q.type]);
-  q.requester = pick(REQUESTERS);
+  const rq = pick(REQUESTERS); q.requester = rq[0]; q.sig = rq[1];
   q.pic = pick(QUEST_PICS[q.type]);
   // 書類（不備はそれぞれ独立に）
   const T = todayOrd();
@@ -305,7 +307,7 @@ function clearPersonal(t) {
   t.objs = t.objs.filter(o => !o.personal && !(o.tray === 'apply' && o.boundTo === pid));
 }
 function leave(t, lines, extra) {
-  t.state = 'leaving'; t.until = S.rt + CFG.LEAVE_SEC + (extra || 0);
+  t.state = 'leaving'; t.until = S.rt + CFG.LEAVE_SEC + (extra || 0); t.fadeAt = S.rt;
   if (lines) say(t.party, lines, CFG.LEAVE_SEC + (extra || 0));
 }
 function freeTable(t) { t.state = 'empty'; t.party = null; }
@@ -434,7 +436,12 @@ function toMorning() {
   dirty();
 }
 function toNight() { S.phase = 'night'; S.clock = CFG.CLOSE + 10; $('#reportOv').hidden = true; SFX.night(); showScene('深夜', '明日の準備をして休みます'); dirty(); }
-function nextDay() { if (S.phase !== 'night') return; stowUtilities(tbl()); S.day++; save(); toMorning(); }
+function nextDay() {
+  if (S.phase !== 'night') return;
+  stowUtilities(tbl());
+  for (const t of S.tables) t.objs = t.objs.filter(o => o.doc !== 'order'); // 出したままの注文用紙は片付ける
+  S.day++; save(); toMorning();
+}
 
 /* ================= 注文 ================= */
 function sendOrder(form) {
@@ -514,7 +521,7 @@ function paperEl(o) {
     const row = el('div', 'q-row'); row.appendChild(el('span', '', `難易度 ${d.diff}級`)); row.appendChild(el('span', '', `所要 ${d.hours}時間`)); e.appendChild(row);
     e.appendChild(el('div', 'q-req', '依頼者：' + d.requester));
     const sig = el('div', 'q-sig'); sig.appendChild(el('span', 'k', '完了時サイン'));
-    if (d.signed) sig.appendChild(el('span', 'sig', d.requester.split(' ').pop().slice(0, 4) + '〆'));
+    if (d.signed) sig.appendChild(el('span', 'sig', (d.sig || d.requester) + '〆'));
     e.appendChild(sig);
     if (d.original) e.appendChild(el('div', 'q-orig', '（原本）'));
   } else if (o.doc === 'card') {
@@ -524,7 +531,7 @@ function paperEl(o) {
     info.appendChild(el('div', 'c-name', d.name));
     info.appendChild(el('div', '', `職業　${d.job}`));
     info.appendChild(el('div', '', `ランク　${d.rank}`));
-    info.appendChild(el('div', 'c-exp', '更新期限　' + calText(calFrom(d.expiry)).replace(CAL.ERA, '')));
+    info.appendChild(el('div', 'c-exp', '更新期限 ' + calShort(calFrom(d.expiry))));
     b.appendChild(info); e.appendChild(b);
   } else if (o.doc === 'apply' || o.doc === 'pform') {
     e.appendChild(el('div', 'f-title', '受注申請用紙'));
@@ -585,16 +592,18 @@ function smallEl(o) {
 }
 function toolEl(o) {
   const e = el('div', 'obj tool tool-' + o.tool);
-  if (o.tool === 'pen') { const im = el('img', 'px'); im.src = 'img/dep_quill.png'; e.appendChild(im); }
-  else {
-    const im = el('img', 'px'); im.src = 'img/item_stamp.png'; e.appendChild(im);
+  const im = el('img', 'px');
+  im.src = o.tool === 'pen' ? 'img/dep_quill.png' : o.tool === 'ar' ? 'img/stamp_ar.png' : o.tool === 'seal' ? 'img/stamp_seal.png' : 'img/stamp_q.png';
+  e.appendChild(im);
+  if (o.tool !== 'pen') {
     const lab = o.tool === 'ar' ? (o.face === 'approve' ? '認' : '却') : o.tool === 'seal' ? '承' : o.tool.slice(1);
-    e.appendChild(el('span', 'tlab ' + (o.tool === 'ar' ? o.face : o.tool), lab));
+    e.appendChild(el('span', 'tlab ' + (o.tool === 'ar' ? o.face : o.tool === 'seal' ? 'seal' : 'q'), lab));
   }
   return e;
 }
 function fixtureEls(t, root) {
   for (const k of ['apply', 'order']) {
+    if (k === 'order' && S.phase !== 'night') continue;
     const f = FIX[k];
     const e = el('div', 'fix tray tray-' + k); e.dataset.fix = k;
     Object.assign(e.style, { left: f.x + 'px', top: f.y + 'px', width: f.w + 'px', height: f.h + 'px' });
@@ -621,11 +630,12 @@ function renderTable() {
   root.appendChild(el('div', 'putaway-zone'));
   fixtureEls(t, root);
   for (const o of t.objs) {
-    if (o.held) continue;
+    if (o.held || hiddenNow(o)) continue;
     const e = o.cls === 'paper' ? paperEl(o) : o.cls === 'book' ? bookEl(o) : o.cls === 'small' ? smallEl(o) : toolEl(o);
     e.dataset.id = o.id;
     e.style.left = o.x + 'px'; e.style.top = o.y + 'px';
     if (o.cls === 'paper' || o.cls === 'book') e.style.zIndex = o.z; else e.style.zIndex = 100000;
+    if (o.personal && t.state === 'leaving') { e.classList.add('fading'); e.style.animationDelay = -(S.rt - t.fadeAt) + 's'; }
     root.appendChild(e);
   }
 }
@@ -665,15 +675,22 @@ function renderLobby() {
 /* ================= 画面：設備窓 ================= */
 function setEq(id) { const i = EQS.findIndex(e => e.id === id); if (i >= 0 && i !== S.eq) { S.eq = i; dirty(); } }
 function stepEq(d) { S.eq = (S.eq + d + EQS.length) % EQS.length; SFX.click(); dirty(); }
+const BOX_LAYOUT = { pouch: { x: 5, y: 5, per: 2, dx: 8 }, crate_s: { x: 3, y: 4, per: 3, dx: 9 }, crate_l: { x: 3, y: 4, per: 5, dx: 7 } };
 function boxEl(b, cls) {
-  const e = el('div', 'box ' + (cls || ''));
-  const type = PACK_OF[b.n] || 'crate_s';
-  const im = el('img', 'px box-img'); im.src = `img/item_${type}_open.png`; e.appendChild(im);
+  const type = PACK_OF[b.n] || 'crate_s', L = BOX_LAYOUT[type], k = 2;
+  const e = el('div', 'box box-' + type + ' ' + (cls || ''));
+  const back = el('img', 'px box-back'); back.src = `img/box_${type}_back.png`; e.appendChild(back);
   const inner = el('div', 'box-inner');
-  for (let i = 0; i < b.left; i++) { const it = el('img', 'px'); it.src = `img/item_${b.kind}.png`; inner.appendChild(it); }
+  for (let i = 0; i < b.left; i++) {
+    const row = Math.floor(i / L.per), col = i % L.per;
+    const it = el('img', 'px'); it.src = `img/mini_${b.kind}.png`;
+    it.style.left = (L.x + col * L.dx + (row ? 4 : 0)) * k + 'px'; it.style.top = (L.y + row * 3) * k + 'px';
+    inner.appendChild(it);
+  }
   e.appendChild(inner);
-  const lab = el('img', 'px box-label'); lab.src = `img/item_${b.kind}.png`; e.appendChild(lab);
-  e.appendChild(el('span', 'box-n', `${b.left}/${b.n}`));
+  const front = el('img', 'px box-front'); front.src = `img/box_${type}_front.png`; e.appendChild(front);
+  if (type !== 'pouch') { const lab = el('img', 'px box-label'); lab.src = `img/item_${b.kind}.png`; e.appendChild(lab); }
+  e.appendChild(el('span', 'box-n', `${ITEM_NAME2[b.kind]} ${b.left}/${b.n}`));
   return e;
 }
 function renderEq() {
@@ -694,15 +711,17 @@ function renderEq() {
       if (S.foot[i]) slot.appendChild(boxEl(S.foot[i]));
       foot.appendChild(slot);
     }
-    const tr = el('div', 'etrash'); tr.dataset.etrash = '1'; tr.appendChild(el('div', 'trash-can')); tr.appendChild(el('span', '', '空き箱'));
-    foot.appendChild(tr);
     body.appendChild(foot);
-    body.appendChild(el('div', 'eq-note', `棚 ${shelfCount()}/${V2.SHELF_MAX}　足元の箱 ${S.foot.length}/${V2.FOOT_MAX}`));
+    const bottom = el('div', 'shelf-bottom');
+    const tr = el('div', 'etrash'); tr.dataset.etrash = '1'; tr.appendChild(el('div', 'trash-can')); tr.appendChild(el('span', '', '空き箱'));
+    bottom.appendChild(tr);
+    bottom.appendChild(el('div', 'eq-note', `棚 ${shelfCount()}/${V2.SHELF_MAX}　足元の箱 ${S.foot.length}/${V2.FOOT_MAX}`));
+    body.appendChild(bottom);
   } else if (eq.id === 'stock') {
     const g = el('div', 'stockgrid');
     for (let i = 0; i < V2.STOCK_MAX; i++) {
       const c = el('div', 'stslot'); c.dataset.stock = i;
-      if (S.stock[i]) c.appendChild(boxEl(S.stock[i], 'closed'));
+      if (S.stock[i]) c.appendChild(boxEl(S.stock[i]));
       g.appendChild(c);
     }
     body.appendChild(g);
@@ -781,7 +800,7 @@ function renderClerk() {
   if (S.phase === 'night') f = 'rest';
   else if (FACE.kind && now < FACE.until) f = FACE.kind;
   else { if (!S.paused && now >= FACE.nextBlink) { FACE.blinkAt = now; FACE.nextBlink = now + rand(2600, 6200); } const t = now - FACE.blinkAt; f = t < 80 ? 'blink_1' : t < 160 ? 'blink_2' : 'eyeopen'; }
-  if (f !== FACE.shown) { FACE.shown = f; $('#clerkImg').src = CLERK_DIR + 'clerk_' + f + '.png'; }
+  if (f !== FACE.shown) { FACE.shown = f; document.querySelectorAll('#clerkFaces img').forEach(im => { im.hidden = im.dataset.face !== f; }); }
 }
 function showReport() {
   const st = S.stats;
@@ -832,7 +851,7 @@ function onMove(e) {
   if (!press || press.button !== 0) return;
   const o = press.hit.obj;
   if (!press.drag) {
-    if (!isDraggable(o) || Math.hypot(e.clientX - press.x, e.clientY - press.y) < 5) return;
+    if (!isDraggable(o) || Math.hypot(e.clientX - press.x, e.clientY - press.y) < OPT.drag) return;
     press.drag = true; bringFront(o);
     const node = document.querySelector(`#table [data-id="${o.id}"]`);
     if (node) { node.style.zIndex = o.cls === 'small' ? 100001 : o.z; node.classList.add('dragging'); }
@@ -848,7 +867,7 @@ function onUp(e) {
   const pr = press; press = null;
   hideZones();
   if (pr.drag) { dropObj(pr.hit.obj, e); return; }
-  if (Math.hypot(e.clientX - pr.x, e.clientY - pr.y) >= 5) return;
+  if (Math.hypot(e.clientX - pr.x, e.clientY - pr.y) >= OPT.drag) return;
   clickTable(pr.button, pr.hit, e);
 }
 function showZones(o) {
@@ -860,16 +879,16 @@ function inRect(p, f) { return p.x >= f.x && p.x <= f.x + f.w && p.y >= f.y && p
 function dropObj(o, e) {
   const t = tbl(), p = tablePoint(e);
   const overEq = !!document.elementsFromPoint(e.clientX, e.clientY).find(x => x.closest && x.closest('#equip'));
+  const w = objW(o), h = objH(o);
+  const atTop = p.y < HANDOVER_H || o.y < HANDOVER_H - 6;
+  const atRight = p.x > TW - PUTAWAY_W || overEq || o.x + w > TW + 6;
   // 上の端：依頼者へ渡す
-  if (p.y < HANDOVER_H && o.cls === 'paper') {
-    if (tryHandOver(t, o)) return;
-  }
+  if (atTop && o.cls === 'paper' && tryHandOver(t, o)) return;
   // 右の端・設備窓：しまう／郵便
-  if (p.x > TW - PUTAWAY_W || overEq) {
+  if (atRight) {
     if (o.cls === 'book' && o.util) { putAwayBook(o); return; }
-    if (o.cls === 'paper' && o.doc === 'order') {
-      if (EQS[S.eq].id === 'mail' && o.data.stamps.some(s => s.t === 'seal')) { sendOrder(o); return; }
-    }
+    if (o.cls === 'small') { putAwaySmall(o); return; }
+    if (o.cls === 'paper' && o.doc === 'order' && EQS[S.eq].id === 'mail' && o.data.stamps.some(s => s.t === 'seal')) { if (sendOrder(o)) return; }
   }
   // ゴミ箱・用紙入れ（取り出した用紙だけ）
   if (o.cls === 'paper' && o.tray) {
@@ -877,9 +896,9 @@ function dropObj(o, e) {
     const blank = !(o.data.stamps || []).length && !Object.values(o.data.checks || {}).some(Boolean) && !Object.values(o.data.qty || {}).some(Boolean);
     if (blank && inRect(p, FIX[o.tray])) { t.objs = t.objs.filter(x => x !== o); SFX.paper(); dirty(); return; }
   }
-  // 普通に置く（テーブルの中へ収める）
-  if (o.cls === 'small') { settle(t, o); }
-  else { o.x = clamp(o.x, -objW(o) + 40, TW - 40); o.y = clamp(o.y, HANDOVER_H, TH - 40); }
+  // 普通に置く（テーブルの中に収める）
+  if (o.cls === 'small') settle(t, o);
+  else { o.x = clamp(o.x, 0, TW - w); o.y = clamp(o.y, HANDOVER_H, TH - h); }
   SFX.soft(); dirty();
 }
 function tryHandOver(t, o) {
@@ -951,6 +970,7 @@ function swap(h, o) {
 }
 function takeForm(kind) {
   const t = tbl();
+  if (kind === 'order' && S.phase !== 'night') return;
   if (t.objs.some(o => o.tray === kind)) { SFX.deny(); toast('用紙はテーブルに1枚まで出せます'); return; }
   const [w, h] = PAPER[kind];
   const sp = freeSpot(t, w, h);
@@ -1025,10 +1045,10 @@ function onEqDown(e) {
 function onEqMove(e) {
   moveHand(e);
   if (!epress || epress.button !== 0 || epress.drag) { if (ghost) moveGhost(e); return; }
-  if (Math.hypot(e.clientX - epress.x, e.clientY - epress.y) < 5) return;
+  if (Math.hypot(e.clientX - epress.x, e.clientY - epress.y) < OPT.drag) return;
   let src = null;
   if (epress.shelf != null && S.shelf[epress.shelf]) src = `img/item_${S.shelf[epress.shelf]}.png`;
-  else if (epress.foot != null && S.foot[epress.foot]) src = `img/item_${PACK_OF[S.foot[epress.foot].n] || 'crate_s'}_open.png`;
+  else if (epress.foot != null && S.foot[epress.foot]) src = `img/box_${PACK_OF[S.foot[epress.foot].n] || 'crate_s'}_back.png`;
   else if (epress.bag === 'tags') src = 'img/item_tags.png';
   else if (epress.bag === 'manual') src = null;
   if (!src && epress.bag !== 'manual') return;
@@ -1043,7 +1063,7 @@ function onEqUp(e) {
   const pr = epress; epress = null;
   if (ghost) { ghost.remove(); ghost = null; }
   if (pr.drag) { eqDrop(pr, e); return; }
-  if (Math.hypot(e.clientX - pr.x, e.clientY - pr.y) >= 5) return;
+  if (Math.hypot(e.clientX - pr.x, e.clientY - pr.y) >= OPT.drag) return;
   eqClick(pr, e);
 }
 function overTable(e) { const r = $('#table').getBoundingClientRect(); return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom; }
@@ -1075,7 +1095,7 @@ function eqClick(pr, e) {
     if (pr.foot != null && S.foot[pr.foot]) {
       const b = S.foot[pr.foot];
       if (btn === 0) { if (b.left > 0 && shelfPut(b.kind)) { b.left--; SFX.clink(); dirty(); } else SFX.deny(); return; }
-      if (btn === 2) { if (S.stock.length < V2.STOCK_MAX) { S.foot.splice(pr.foot, 1); S.stock.push(b); SFX.thump(); dirty(); } else SFX.deny(); return; }
+      if (btn === 2) { if (S.stock.length < V2.STOCK_MAX) { S.foot.splice(pr.foot, 1); S.stock.push(b); SFX.thump(); toast('箱を在庫棚に戻しました'); dirty(); } else { SFX.deny(); toast(`在庫棚に置ける箱は${V2.STOCK_MAX}個までです`); } return; }
     }
   } else if (eq === 'stock') {
     if (pr.stock != null && S.stock[pr.stock] && btn === 0) {
@@ -1102,11 +1122,17 @@ function takeFromBag(what, p) {
 
 /* ================= オプション（訪問頻度） ================= */
 const OPT_KEY = 'guild-clerk-options';
-const OPT = { visit: CFG.VISIT_RATE.def };
-try { const o = JSON.parse(localStorage.getItem(OPT_KEY) || 'null'); if (o && typeof o.visit === 'number') OPT.visit = clamp(o.visit, CFG.VISIT_RATE.min, CFG.VISIT_RATE.max); } catch (e) { /* noop */ }
+const DRAG = { min: 1, max: 30, def: 5 };
+const OPT = { visit: CFG.VISIT_RATE.def, drag: DRAG.def };
+try {
+  const o = JSON.parse(localStorage.getItem(OPT_KEY) || 'null');
+  if (o && typeof o.visit === 'number') OPT.visit = clamp(o.visit, CFG.VISIT_RATE.min, CFG.VISIT_RATE.max);
+  if (o && typeof o.drag === 'number') OPT.drag = clamp(o.drag, DRAG.min, DRAG.max);
+} catch (e) { /* noop */ }
 function saveOpt() { try { localStorage.setItem(OPT_KEY, JSON.stringify(OPT)); } catch (e) { /* noop */ } }
 function renderOptions() {
   $('#optVisit').textContent = '×' + OPT.visit.toFixed(1);
+  $('#optDrag').textContent = OPT.drag + 'px';
   $('#optVisitNote').textContent = `来訪の間隔：平均 約${Math.round((CFG.ARRIVAL_GAP[0] + CFG.ARRIVAL_GAP[1]) / 2 / OPT.visit)}分（ゲーム内）`;
 }
 function setPaused(v) { if (!busy()) v = false; S.paused = v; $('#pauseOv').hidden = !v; if (v) { $('#optBox').hidden = true; $('#pauseMain').hidden = false; } }
@@ -1120,6 +1146,8 @@ function fit() {
 }
 function setup() {
   MANUAL = manualPages();
+  const faces = $('#clerkFaces');
+  for (const f of ['eyeopen', 'blink_1', 'blink_2', 'happy', 'sad', 'rest']) { const im = el('img', 'px'); im.src = CLERK_DIR + 'clerk_' + f + '.png'; im.dataset.face = f; im.alt = '受付嬢'; im.hidden = f !== 'eyeopen'; faces.appendChild(im); }
   const booths = $('#booths');
   for (let i = 0; i < CFG.SLOTS; i++) {
     const r = el('div', 'booth'); r.style.left = (12 + i * 211) + 'px';
@@ -1159,6 +1187,9 @@ function setup() {
   $('#optVisitDown').addEventListener('click', () => { OPT.visit = Math.round(clamp(OPT.visit - 0.1, CFG.VISIT_RATE.min, CFG.VISIT_RATE.max) * 10) / 10; saveOpt(); renderOptions(); });
   $('#optVisitUp').addEventListener('click', () => { OPT.visit = Math.round(clamp(OPT.visit + 0.1, CFG.VISIT_RATE.min, CFG.VISIT_RATE.max) * 10) / 10; saveOpt(); renderOptions(); });
   $('#optVisitReset').addEventListener('click', () => { OPT.visit = CFG.VISIT_RATE.def; saveOpt(); renderOptions(); });
+  $('#optDragDown').addEventListener('click', () => { OPT.drag = clamp(OPT.drag - 1, DRAG.min, DRAG.max); saveOpt(); renderOptions(); });
+  $('#optDragUp').addEventListener('click', () => { OPT.drag = clamp(OPT.drag + 1, DRAG.min, DRAG.max); saveOpt(); renderOptions(); });
+  $('#optDragReset').addEventListener('click', () => { OPT.drag = DRAG.def; saveOpt(); renderOptions(); });
   const sb = $('#btnSound'); const sl = () => { sb.textContent = SFX.isOn() ? '音 入' : '音 切'; }; sl();
   sb.addEventListener('click', () => { SFX.init(); SFX.setOn(!SFX.isOn()); sl(); });
   addEventListener('resize', fit); fit();
