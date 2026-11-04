@@ -295,3 +295,30 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .wrack .wlab, .wcbox .wlab { bottom: auto; top: -16px; }
 .wtemp .wlab { left: 6px; right: auto; bottom: auto; top: 2px; color: rgba(246, 236, 210, .75); }
+
+/* 属性の復活：写しの裏面・信仰・状態異常・6品 */
+.doc-apply, .doc-pform { height: 282px; }
+.doc-order { height: 318px; }
+.o-row { margin: 2px 0; }
+.o-slot { width: 30px; height: 30px; }
+.o-slot.done { font-size: 14px; }
+.q-req { position: relative; }
+.q-turn { position: absolute; right: 0; top: 0; font-size: 9px; color: #fff; background: #8a6a40; padding: 0 3px; }
+.doc-quest.back { background: #f1ead6; }
+.q-btitle { font-size: 12px; text-align: center; color: var(--ink-soft); border-bottom: 1px solid #6b4a36; margin-bottom: 2px; }
+.q-sec { font-size: 13px; margin: 5px 0 2px; padding-left: 4px; border-left: 4px solid #8a4a1e; }
+.q-brow { display: flex; gap: 6px; font-size: 11px; line-height: 1.35; padding: 1px 0; border-bottom: 1px dashed #d8c8a0; }
+.q-brow .k { flex: none; width: 26px; color: var(--ink-soft); }
+.q-brow .v { flex: 1; }
+.abadge { display: inline-block; padding: 0 5px; border: 1px solid #1c110b; font-size: 12px; line-height: 1.35; }
+.r-v .abadge { font-size: 14px; }
+.para-shake { animation: para .25s steps(2) infinite; }
+@keyframes para { 50% { transform: translateX(1px); } }
+.m-toc { margin: 2px 0; padding-left: 1.4em; line-height: 1.55; }
+.m-small { font-size: 10px; line-height: 1.45; }
+.m-attr td { font-size: 10px; padding: 0 3px; }
+.book .m-tb { width: 100%; }
+.book-roster .r-page { margin-top: 2px; }
+.book-roster .r-v { font-size: 14px; margin-bottom: 1px; }
+.book-roster .r-v.big { font-size: 18px; }
+.book-roster .r-k { font-size: 9px; }

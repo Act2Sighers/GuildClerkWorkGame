@@ -25,6 +25,7 @@ C = {
     "G": hx("#f2c64a") + (255,), "g": hx("#b48a22") + (255,),
     "Y": hx("#f4e8c8") + (255,), "y": hx("#cdb88c") + (255,),
     "R": hx("#d6404f") + (255,), "N": hx("#3a2e30") + (255,), "S": hx("#c8a070") + (255,),
+    "U": hx("#4a7ac8") + (255,),
 }
 
 
@@ -76,6 +77,23 @@ BOTTLE = {
         "...viiiiiiiiv...",
         "....vvvvvvvv....",
     ],
+    # クジラ酒の瓶：角ばった肩と、やや太い首
+    "whale": [
+        ".....vVVVVv.....",
+        ".....ViiiiV.....",
+        ".....ViiiiV.....",
+        "....VViiiiVV....",
+        "...VwiiiiiiiV...",
+        "...Vwiiiiiiiv...",
+        "...Vwiiiiiiiv...",
+        "...Viiiiiiiiv...",
+        "...Viiiiiiiiv...",
+        "...Viiiiiiiiv...",
+        "...Viiiiiiiiv...",
+        "...Viiiiiiiiv...",
+        "...Vviiiiiivv...",
+        "....vvvvvvvv....",
+    ],
 }
 CORK = {
     # 広口の平たい栓（回復ジェルの瓶）
@@ -94,10 +112,19 @@ CORK = {
         "..KcK..",
         "..kKk..",
     ],
+    # 中くらいの栓（クジラ酒の瓶）。青い紐を巻く
+    "whale": [
+        "kKKcKk",
+        "kKKKKk",
+        "UUUUUU",
+        ".KcKK.",
+        ".KKcK.",
+        ".kKKk.",
+    ],
 }
 # 容器（16x20）の中での栓とタグの位置（JS の WB_CORK・WB_TAG と同じ）
-CORK_POS = {"gel": (2, 3), "elixir": (4, 5)}
-TAG_POS = {"gel": (11, 7), "elixir": (9, 9)}
+CORK_POS = {"gel": (2, 3), "elixir": (4, 5), "whale": (5, 3)}
+TAG_POS = {"gel": (11, 7), "elixir": (9, 9), "whale": (10, 8)}
 TAG = [
     "S.........",
     ".S........",
@@ -125,7 +152,7 @@ def grime(kind, seed):
     px = im.load()
     pts = inner_mask(kind)
     bottom = max(y for _, y in pts)
-    res = (95, 190, 120) if kind == "gel" else (190, 120, 230)
+    res = {"gel": (95, 190, 120), "elixir": (190, 120, 230), "whale": (214, 178, 104)}[kind]
     for x, y in pts:
         if y >= bottom - 2 + (1 if rnd.random() < 0.3 else 0):
             px[x, y] = res + (230,)
@@ -160,7 +187,7 @@ def return_box(bottles, corks, tag):
     d.polygon([(0, 12), (6, 4), (W - 7, 4), (W - 1, 12)], fill=hx("#7a4e28"))
     d.polygon([(3, 12), (8, 7), (W - 9, 7), (W - 4, 12)], fill=hx("#3a2414"))
     rnd = random.Random(7)
-    kinds = ["gel", "elixir", "gel", "gel", "elixir", "gel", "gel"]
+    kinds = ["gel", "elixir", "gel", "whale", "gel", "elixir", "gel"]
     for n, k in enumerate(kinds):
         b = bottles[k].copy()
         b.alpha_composite(grime(k, 40 + n))
@@ -225,7 +252,8 @@ def cloth():
         "..................",
         "..................",
     ]
-    C["U"] = hx("#7aa0c8") + (255,)
+    rows = [r.replace("U", "u") for r in rows]
+    C["u"] = hx("#7aa0c8") + (255,)
     return outline(grid(rows))
 
 
@@ -296,8 +324,8 @@ def main():
         b = grid(BOTTLE[k], 20)
         bottles[k] = b
         b.save(os.path.join(OUT, f"bottle_{k}.png")); out["bottle_" + k] = b
-        g = grime(k, 11 if k == "gel" else 23); g.save(os.path.join(OUT, f"grime_{k}.png")); out["grime_" + k] = g
-        dr = drops(k, 5 if k == "gel" else 9); dr.save(os.path.join(OUT, f"drops_{k}.png")); out["drops_" + k] = dr
+        g = grime(k, {"gel": 11, "elixir": 23, "whale": 31}[k]); g.save(os.path.join(OUT, f"grime_{k}.png")); out["grime_" + k] = g
+        dr = drops(k, {"gel": 5, "elixir": 9, "whale": 13}[k]); dr.save(os.path.join(OUT, f"drops_{k}.png")); out["drops_" + k] = dr
         c = outline(grid(CORK[k])); corks[k] = c
         c.save(os.path.join(OUT, f"cork_{k}.png")); out["cork_" + k] = c
     tag = outline(grid(TAG)); tag.save(os.path.join(OUT, "tag.png")); out["tag"] = tag
@@ -320,7 +348,7 @@ def main():
             dirty = bottles[k].copy(); dirty.alpha_composite(out["grime_" + k]); put(dirty, x + 60, 10)
             wet = bottles[k].copy(); wet.alpha_composite(out["drops_" + k]); put(wet, x + 120, 10)
             put(corks[k], x + 180, 10)
-            x += 260
+            x += 210
         put(tag, 540, 10)
         put(rb, 10, 100)
         comp = bb.copy(); comp.alpha_composite(bottles["gel"], (20, 0)); comp.alpha_composite(bw); comp.alpha_composite(bf); put(comp, 210, 100)

@@ -15,7 +15,7 @@ const rankIdx = r => RANKS.indexOf(r);
 const hhmm = m => { m = Math.floor(m); return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const META = window.ADV_META;
-const ITEM_NAME2 = { gel: '回復ジェル', elixir: '霊薬' };
+const ITEM_NAME2 = ITEM_NAME;
 
 /* ================= 画像 ================= */
 const IMGS = {};
@@ -50,11 +50,15 @@ const PSETS = [
   { id: 'wash', name: '内職：容器の洗浄', open: () => S.phase === 'business' },
   { id: 'order', name: '注文書を書く', open: () => S.phase === 'night' },
 ];
-const PAPER = { quest: [196, 262], card: [214, 118], apply: [196, 250], pform: [196, 250], order: [196, 206] };
-const BOOK = { roster: [140, 190], manual: [212, 336] };
+const PAPER = { quest: [196, 262], card: [214, 118], apply: [196, 282], pform: [196, 282], order: [196, 318] };
+const BOOK = { roster: [140, 190], manual: [212, 392] };
 const SMALL_DESC = {
   gel: '回復ジェル（ギルド支給品）。負傷した人に渡す',
   elixir: '霊薬（ギルド支給品）。幽霊になった人に渡す',
+  whale: 'クジラ酒（ギルド支給品）。火傷した人に渡す',
+  candy: '陽飴（ギルド支給品）。凍えた人に渡す',
+  bband: '黒包帯（ギルド支給品）。麻痺した人に渡す',
+  neut: '中和剤（ギルド支給品）。毒を受けた人に渡す',
   tags: '「ギルド支給品」タグの束。持ったまま品を左クリックで付け、右クリックで外す',
 };
 const EQS = [
@@ -82,7 +86,7 @@ const openSets = () => PSETS.filter(p => p.open());
 // 個人用テーブルで今開いているセット（開けるものがなければ null）
 const curSet = () => { if (!personal()) return null; const a = openSets(); return a.find(p => p.id === S.pset) ? S.pset : null; };
 function newStats() {
-  return { visitors: 0, approved: 0, rejected: 0, recMiss: 0, returned: 0, retMiss: 0, lost: 0, incomeHQ: 0, incomeOwner: 0, used: { gel: 0, elixir: 0 }, closedAway: 0, orderCost: 0, incomeSide: 0, washBoxes: 0 };
+  return { visitors: 0, approved: 0, rejected: 0, recMiss: 0, returned: 0, retMiss: 0, lost: 0, incomeHQ: 0, incomeOwner: 0, used: Object.fromEntries(V2.ITEMS.map(k => [k, 0])), closedAway: 0, orderCost: 0, incomeSide: 0, washBoxes: 0 };
 }
 const today = () => calFrom(calOrd(CAL.START) + S.day - 1);
 const todayOrd = () => calOrd(CAL.START) + S.day - 1;
@@ -204,7 +208,42 @@ function stepSet(d) {
   S.pset = a[(i + d + a.length) % a.length].id; SFX.click(); dirty();
 }
 
-/* ================= パーティの生成と判定（縮小版） ================= */
+/* ================= 属性（v1 の規則） ================= */
+const beats = (a, b) => !!(BEATS[a] && BEATS[a].includes(b));
+const memberAttr = m => FAITH_ATTR[m.faith] || null;
+// 外部属性：討伐なら魔物の属性、探索・護衛なら場所の環境の属性
+function extAttr(q) {
+  if (!q.place) return null;
+  return q.type === '討伐' ? (q.monster ? q.monster.attr : null) : ENVS[q.place.env].attr;
+}
+// 内部属性どうしで属性相性が生じている組 [有利側, 不利側]
+function attrPairs(members) {
+  const at = members.map(memberAttr).filter(Boolean), out = [];
+  for (let i = 0; i < at.length; i++) for (let j = i + 1; j < at.length; j++) {
+    if (beats(at[i], at[j])) out.push([at[i], at[j]]);
+    if (beats(at[j], at[i])) out.push([at[j], at[i]]);
+  }
+  return out;
+}
+function attrDanger(members, E) {
+  if (!E) return false;
+  const at = members.map(memberAttr).filter(Boolean);
+  if (E === '光') return !at.includes('闇');
+  if (E === '闇') return !at.includes('光');
+  if (E === '風') return attrPairs(members).length > 0;
+  return !(at.filter(a => beats(a, E)).length > at.filter(a => beats(E, a)).length);
+}
+// 帰還時に掛かる可能性のある状態異常（場所の環境・魔物の属性・風の外部属性での属性相性）
+function ailCandidates(p) {
+  const q = p.quest; if (!q.place) return [];
+  const set = new Set(ENVS[q.place.env].ail);
+  if (q.monster && ATTR_AIL[q.monster.attr]) set.add(ATTR_AIL[q.monster.attr]);
+  if (extAttr(q) === '風') for (const [a] of attrPairs(p.members)) if (ATTR_AIL[a]) set.add(ATTR_AIL[a]);
+  return [...set];
+}
+const AIL_TINT = { burn: 'rgba(255,110,50,0.16)', chill: 'rgba(140,200,255,0.38)', para: 'rgba(255,230,70,0.18)', poison: 'rgba(140,70,190,0.32)' };
+
+/* ================= パーティの生成と判定 ================= */
 function evaluateCore(members, quest) {
   const d = rankIdx(quest.diff);
   const good = m => JOB_STRONG[m.job] === quest.type;
@@ -213,10 +252,63 @@ function evaluateCore(members, quest) {
   return {
     comp: !(members.some(m => good(m) && high(m)) || members.filter(m => good(m) || high(m)).length >= 3),
     short: (quest.diff === 'A' && n <= 2) || (quest.diff === 'S' && n <= 3),
+    attr: attrDanger(members, extAttr(quest)),
   };
 }
-function fillPhrase(tpl, diff) {
-  return tpl.replace(/\{(\w+)\}/g, (_, k) => k === 'm' ? pick(MONSTER_NAMES[diff]) : pick(QUEST_WORDS[k]));
+const DANGERS = ['comp', 'short', 'attr'];
+const dangerCount = ev => DANGERS.filter(k => ev[k]).length;
+const categoryOf = ev => { const pr = DANGERS.filter(k => ev[k]); return pr.length === 0 ? 'fit' : pr.length >= 2 ? 'multi' : pr[0]; };
+
+/* ---------- クエストの中身：場所 → 魔物 → 素材 → 概要 → 依頼者・題・絵（v2/js/world2.js） ---------- */
+const monstersAt = (pl, diff) => MONSTERS2.filter(m => m[2].includes(diff) && m[3].some(t => pl.tags.includes(t)));
+const nearOf = (pl, table) => pl.near.flatMap(n => table[n] || []);
+const ZONE_W = { low: { C: 4, B: 3, A: 1.5, S: 0.6 }, high: { C: 0.6, B: 1.5, A: 3, S: 4 }, safe: { C: 1, B: 1, A: 1, S: 1 } };
+const pickW = (arr, w) => { let r = Math.random() * arr.reduce((a, x) => a + w(x), 0); for (const x of arr) { r -= w(x); if (r <= 0) return x; } return arr[arr.length - 1]; };
+function genQuest(type, diff, hours) {
+  for (let tries = 0; tries < 60; tries++) {
+    const [tpl, zone] = pick(QUEST_PHRASES2[type]);
+    const need = k => tpl.includes('{' + k + '}');
+    const cands = PLACES.filter(pl => {
+      if (zone ? pl.zone !== zone : (need('p') && pl.zone === 'safe')) return false;
+      const ms = monstersAt(pl, diff);
+      if (type === '討伐' && !ms.length) return false;
+      if (need('mat') && !ms.some(m => m[4])) return false;
+      if (need('nat') && !(pl.nat && pl.nat.length)) return false;
+      if (need('pet') && !nearOf(pl, PETS2).length) return false;
+      if (need('who') && !nearOf(pl, WHO2).length) return false;
+      return true;
+    });
+    if (!cands.length) continue;
+    // 場所
+    const pl = pickW(cands, x => ZONE_W[x.zone][diff]);
+    const n = pick(PLACE_NAMES);
+    const place = { name: pl.fmt ? pl.fmt.replace('{n}', n) : n + pick(pl.t), env: pl.env, zone: pl.zone, desc: pick(pl.desc || PLACE_BY_ENV[pl.env][1]) };
+    // 魔物（その場所に棲み、難易度に合うもの。安全管理区域にはいない）
+    const pool = monstersAt(pl, diff).filter(m => !need('mat') || m[4]);
+    // 属性のない魔物や、どこにでもいる魔物ばかりにならないように重みを付ける
+    const mo = pool.length ? pickW(pool, m => (m[1] ? 1 : 0.45) * (m[3].length > 4 ? 0.4 : 1)) : null;
+    const flock = mo && isFlock(mo[0]);
+    const monster = mo ? {
+      name: mo[0], attr: mo[1],
+      traits: shuffle(MONSTER_TRAITS2.filter(([, c]) => !c || (c === 'flock' ? flock : c === 'single' ? !flock : true))).slice(0, 2).map(x => x[0]),
+      damage: pick(MONSTER_DAMAGE2.filter(([, c]) => !c || pl.near.includes(c)))[0],
+    } : null;
+    // 概要
+    const phrase = tpl.replace(/\{(\w+)\}/g, (_, k) => k === 'm' ? mo[0] : k === 'mat' ? mo[4] : k === 'nat' ? pick(pl.nat) : k === 'pet' ? pick(nearOf(pl, PETS2)) : k === 'who' ? pick(nearOf(pl, WHO2)) : place.name);
+    // 依頼者・題・絵
+    const rqPool = Math.random() < 0.2 ? REQUESTERS2.any : nearOf(pl, REQUESTERS2);
+    const rq = pick(rqPool.length ? rqPool : REQUESTERS2.any);
+    const ctx = { near: pl.near, monster, zone: pl.zone, kind: need('nat') ? 'nat' : need('pet') ? 'pet' : need('p') && !zone ? 'place' : '' };
+    const titleOk = list => list.filter(([, c]) => !c || c(ctx));
+    let titles = titleOk(Math.random() < 0.4 ? QUEST_TITLES3.共通 : QUEST_TITLES3[type]);
+    if (!titles.length) titles = titleOk(QUEST_TITLES3.共通);
+    return {
+      type, diff, hours, phrase, title: pick(titles)[0],
+      requester: rq[0].replace('{n}', n), sig: rq[1].replace('{n}', n),
+      pic: 2 * pick(pl.sc) + randi(0, 1), monster, place,
+    };
+  }
+  return null;
 }
 function genParty() {
   const used = new Set();
@@ -232,23 +324,16 @@ function genParty() {
     const members = shuffle(pool).slice(0, n).map(gid => {
       const job = Math.random() < LOOK_MATCH_RATE ? LOOK_JOB[META.chars[gid].look] : pick(JOBS);
       const r = clamp(base - (Math.random() < 0.35 ? 1 : 0) + (Math.random() < 0.1 ? 1 : 0), 0, 3);
-      return { gid, job, rank: RANKS[r], status: 'ok', name: '' };
+      return { gid, job, rank: RANKS[r], faith: weighted(FAITH_WEIGHT), status: 'ok', ail: null, name: '' };
     });
-    const type = pick(QUEST_TYPES);
-    const diff = RANKS[clamp(base + +weighted({ '-1': 22, 0: 45, 1: 26, 2: 7 }), 0, 3)];
-    const quest = { type, diff, hours: randi(1, maxH) };
+    const quest = genQuest(pick(QUEST_TYPES), RANKS[clamp(base + +weighted({ '-1': 22, 0: 45, 1: 26, 2: 7 }), 0, 3)], randi(1, maxH));
+    if (!quest) continue;
     const ev = evaluateCore(members, quest);
-    const cat = ev.comp && ev.short ? 'both' : ev.comp ? 'comp' : ev.short ? 'short' : 'fit';
     best = { members, quest, ev };
-    if (cat === target) break;
+    if (categoryOf(ev) === target) break;
   }
   const usedNames = new Set();
   for (const m of best.members) { const list = NAMES[META.chars[m.gid].g].filter(x => !usedNames.has(x)); m.name = pick(list); usedNames.add(m.name); }
-  const q = best.quest;
-  q.phrase = fillPhrase(pick(QUEST_PHRASES[q.type]), q.diff);
-  q.title = pick(Math.random() < 0.4 ? QUEST_TITLES2.共通 : QUEST_TITLES2[q.type]);
-  const rq = pick(REQUESTERS); q.requester = rq[0]; q.sig = rq[1];
-  q.pic = pick(QUEST_PICS[q.type]);
   // 書類（不備はそれぞれ独立に）
   const T = todayOrd();
   const docs = {
@@ -267,7 +352,7 @@ function genParty() {
   });
   if (!docs.roster && best.members.every(m => !m.card)) best.members[0].card = true; // 何も手がかりがない状態は避ける
   return {
-    id: S.seq++, members: best.members, quest: q, ev: best.ev, docs,
+    id: S.seq++, members: best.members, quest: best.quest, ev: best.ev, docs,
     name: best.members[0].name + 'のパーティ', bubble: null, form: null, mistakes: 0,
   };
 }
@@ -278,6 +363,9 @@ function knowable(p) {
   const res = { must: new Set(), may: new Set() };
   if (hasDocDefect(p)) res.must.add('docs');
   if (p.ev.short) res.must.add('short');
+  // 信仰はパーティ名簿にしか書かれない。名簿がなければ、外部属性があるときは判断できない
+  if (p.docs.roster) { if (p.ev.attr) res.must.add('attr'); }
+  else if (extAttr(p.quest)) res.may.add('attr');
   if (known.every(Boolean)) { if (p.ev.comp) res.must.add('comp'); }
   else {
     // 分からない人を「最も有利」「最も不利」に置いて結果が変わるか
@@ -297,7 +385,7 @@ const bubbleText = p => p && p.bubble && S.rt < p.bubble.until ? p.bubble.text :
 function lay(t, p) {
   // 個人書類をテーブルに広げる（少し重なるくらいに散らす）
   const qx = randi(20, 300), qy = randi(26, 110);
-  addObj(t, { cls: 'paper', doc: 'quest', personal: true, x: qx, y: qy, data: { ...p.quest, original: p.docs.original, signed: false } });
+  addObj(t, { cls: 'paper', doc: 'quest', personal: true, hasBack: !!p.quest.place, x: qx, y: qy, data: { ...p.quest, original: p.docs.original, signed: false } });
   if (p.docs.roster) {
     const sides = rosterSides(p);
     addObj(t, { cls: 'book', book: 'roster', personal: true, binding: p.docs.binding, flip: 0, x: randi(260, 480), y: randi(40, 180), sides, partyName: p.name });
@@ -307,10 +395,15 @@ function lay(t, p) {
     addObj(t, { cls: 'paper', doc: 'card', personal: true, x: randi(380, 570) + k * 8, y: randi(50, 240) + k * 14, data: { gid: m.gid, name: m.name, job: m.job, rank: m.rank, expiry: m.expiry } });
   });
 }
+function attrBadge(text, attr) {
+  const c = ATTR_COLOR[attr] || ['#d8ccb4', '#2a1c14'];
+  return `<span class="abadge" style="background:${c[0]};color:${c[1]}">${text}</span>`;
+}
+const faithBadge = f => f ? attrBadge(f, FAITH_ATTR[f]) : '—';
 function rosterSides(p) {
   const sides = [{ cover: true, html: `<div class="r-cover"><div class="r-t">パーティ名簿</div><div class="r-n">${p.name}</div></div>` },
     { html: '<div class="r-note">ギルド運営本部 発行<br>記載は1ページにつき1名</div>' }];
-  for (const m of shuffle(p.members)) sides.push({ html: `<div class="r-page"><div class="r-k">名前</div><div class="r-v">${m.name}</div><div class="r-k">職業</div><div class="r-v">${m.job}</div><div class="r-k">ランク</div><div class="r-v big">${m.rank}</div></div>` });
+  for (const m of shuffle(p.members)) sides.push({ html: `<div class="r-page"><div class="r-k">名前</div><div class="r-v">${m.name}</div><div class="r-k">職業</div><div class="r-v">${m.job}</div><div class="r-k">ランク</div><div class="r-v big">${m.rank}</div><div class="r-k">信仰</div><div class="r-v">${faithBadge(m.faith)}</div></div>` });
   if (sides.length % 2 === 1) sides.push({ html: '' });
   sides.push({ html: '' }, { cover: true, back: true, html: '<div class="r-cover back"></div>' });
   if (sides.length % 2 === 1) sides.splice(sides.length - 1, 0, { html: '' });
@@ -326,7 +419,7 @@ function spawnParty(t) {
 }
 function seatReturn(t, p) {
   t.party = p; t.state = 'returned'; t.enter = true; p.returned = true;
-  if (!p.retDocs.noCopy) addObj(t, { cls: 'paper', doc: 'quest', personal: true, x: randi(20, 260), y: randi(26, 120), data: { ...p.quest, original: false, signed: true } });
+  if (!p.retDocs.noCopy) addObj(t, { cls: 'paper', doc: 'quest', personal: true, hasBack: !!p.quest.place, x: randi(20, 260), y: randi(26, 120), data: { ...p.quest, original: false, signed: true } });
   if (!p.retDocs.noForm) addObj(t, { cls: 'paper', doc: 'pform', personal: true, x: randi(240, 520), y: randi(26, 140), data: { checks: { ...p.form.checks }, stamps: p.form.stamps.map(s => ({ ...s })) } });
   say(p, V2_LINES.returnOk, 4);
   S.stats.returned++;
@@ -365,7 +458,7 @@ function finishReception(t, form) {
     S.stats.approved++;
     p.form = { checks: { ...form.data.checks }, stamps: form.data.stamps.map(s => ({ ...s })) };
     // 結果（危険に関わる却下事項だけで決まる）
-    const danger = (p.ev.comp ? 1 : 0) + (p.ev.short ? 1 : 0);
+    const danger = dangerCount(p.ev);
     const n = p.members.length;
     if (danger === 0) for (const m of p.members) m.status = Math.random() < CFG.HURT_RATE_FIT ? 'hurt' : 'ok';
     else if (danger === 1) {
@@ -374,6 +467,9 @@ function finishReception(t, form) {
       for (const m of p.members) m.status = g.has(m) ? 'ghost' : (Math.random() < CFG.HURT_RATE_UNFIT ? 'hurt' : 'ok');
     }
     p.lost = danger >= 2;
+    // 状態異常：生き残った人は、候補から等しい確率で1つ掛かることがある（幽霊は掛からない）
+    const cands = ailCandidates(p), rate = danger === 0 ? CFG.AIL_RATE_FIT : CFG.AIL_RATE_UNFIT;
+    for (const m of p.members) m.ail = (m.status !== 'ghost' && cands.length && Math.random() < rate) ? pick(cands) : null;
     p.returnAt = S.clock + p.quest.hours * 60;
     p.retDocs = { noCopy: Math.random() < V2.RETURN_DEFECT.noCopy, noForm: Math.random() < V2.RETURN_DEFECT.noForm };
     if (p.lost) S.stats.lost++; else S.quests.push(p);
@@ -392,19 +488,28 @@ function finishReception(t, form) {
 }
 
 /* ---------- 終了対応を終える ---------- */
+function requiredItems(p) {
+  const need = Object.fromEntries(V2.ITEMS.map(k => [k, 0]));
+  for (const m of p.members) {
+    if (m.status === 'hurt') need.gel++;
+    if (m.status === 'ghost') need.elixir++;
+    if (m.ail) need[AIL_ITEM[m.ail]]++;
+  }
+  return need;
+}
 function finishReturn(t, form) {
   const p = t.party;
   const items = t.objs.filter(o => o.cls === 'small' && o.sub === 'item' && !o.held);
-  const need = { gel: p.members.filter(m => m.status === 'hurt').length, elixir: p.members.filter(m => m.status === 'ghost').length };
-  const got = { gel: items.filter(o => o.item === 'gel').length, elixir: items.filter(o => o.item === 'elixir').length };
+  const need = requiredItems(p);
+  const got = Object.fromEntries(V2.ITEMS.map(k => [k, items.filter(o => o.item === k).length]));
   const miss = [];
-  if (need.gel !== got.gel || need.elixir !== got.elixir) miss.push('渡す数が不適切');
+  if (V2.ITEMS.some(k => need[k] !== got[k])) miss.push('渡す数が不適切');
   if (items.some(o => !o.tagged)) miss.push('タグの付け忘れ');
   const copy = t.objs.find(o => o.personal && o.doc === 'quest');
   if (copy && !copy.data.stamps?.some(s => s.t === 'seal')) miss.push('写しへの承認印の押し忘れ');
   p.mistakes += miss.length;
   S.stats.retMiss += miss.length;
-  S.stats.used.gel += got.gel; S.stats.used.elixir += got.elixir;
+  for (const k of V2.ITEMS) S.stats.used[k] += got[k];
   t.objs = t.objs.filter(o => !items.includes(o) && o !== form);
   for (const m of miss) toast(`テーブル${t.i + 1}：手当のミス：${m}`, 'bad');
   if (miss.length) clerkFace('sad', 1.4); else if (!p.mistakes) clerkFace('happy', 1.6);
@@ -512,7 +617,7 @@ function applySave(d) {
 /* ================= 画面：テーブル ================= */
 let isDirty = true;
 function dirty() { isDirty = true; }
-function sprite(gid, status, scale) {
+function sprite(gid, status, scale, ail) {
   const { w, h, cols } = META;
   const c = el('canvas', 'px'); c.width = w * scale; c.height = h * scale;
   const x = c.getContext('2d'); x.imageSmoothingEnabled = false;
@@ -524,8 +629,15 @@ function sprite(gid, status, scale) {
     ox.globalCompositeOperation = 'source-atop'; ox.fillStyle = 'rgba(150,195,255,0.55)'; ox.fillRect(0, 0, w, h);
     x.globalAlpha = 0.85; x.drawImage(o, 0, 0, w * scale, h * scale); c.classList.add('ghost-float');
   } else {
-    x.drawImage(IMGS.adv, sx, sy, w, h, 0, 0, w * scale, h * scale);
-    if (status === 'hurt') x.drawImage(IMGS.bandage, 0, 0, w, h, 0, 0, w * scale, h * scale);
+    const o = document.createElement('canvas'); o.width = w; o.height = h; const ox = o.getContext('2d');
+    ox.drawImage(IMGS.adv, sx, sy, w, h, 0, 0, w, h);
+    if (status === 'hurt') ox.drawImage(IMGS.bandage, 0, 0);
+    if (ail) {
+      ox.globalCompositeOperation = 'source-atop'; ox.fillStyle = AIL_TINT[ail]; ox.fillRect(0, 0, w, h);
+      ox.globalCompositeOperation = 'source-over'; ox.drawImage(IMGS['ail_' + ail], 0, 0);
+    }
+    x.drawImage(o, 0, 0, w * scale, h * scale);
+    if (ail === 'para') c.classList.add('para-shake');
   }
   return c;
 }
@@ -545,12 +657,24 @@ function stampMark(s) {
 function paperEl(o) {
   const e = el('div', 'obj paper doc-' + o.doc + (o.data.original ? ' original' : ''));
   const d = o.data;
+  if (o.doc === 'quest' && o.back) {
+    e.classList.add('back');
+    e.appendChild(el('div', 'q-btitle', `${d.title}（裏面）`));
+    const sec = (h, rows) => {
+      e.appendChild(el('div', 'q-sec', h));
+      for (const [k, v, html] of rows) { const r = el('div', 'q-brow'); r.appendChild(el('span', 'k', k)); const vv = el('span', 'v'); if (html) vv.innerHTML = v; else vv.textContent = v; r.appendChild(vv); e.appendChild(r); }
+    };
+    const mo = d.monster;
+    sec('魔物', mo ? [['名前', mo.name], ['属性', mo.attr ? attrBadge(mo.attr, mo.attr) : 'なし', true], ['特徴', mo.traits.join('、')], ['被害', mo.damage]] : [['', '確認されている魔物はいない']]);
+    sec('場所', [['名称', d.place.name], ['環境', d.place.env], ['様子', d.place.desc]]);
+    return e;
+  }
   if (o.doc === 'quest') {
     e.appendChild(el('div', 'q-title', d.title));
     const im = el('img', 'px q-pic'); im.src = `img/qpic_${String(d.pic).padStart(2, '0')}.png`; e.appendChild(im);
     e.appendChild(el('div', 'q-phrase', d.phrase));
     const row = el('div', 'q-row'); row.appendChild(el('span', '', `難易度 ${d.diff}級`)); row.appendChild(el('span', '', `所要 ${d.hours}時間`)); e.appendChild(row);
-    e.appendChild(el('div', 'q-req', '依頼者：' + d.requester));
+    const rq = el('div', 'q-req', '依頼者：' + d.requester); if (o.hasBack) rq.appendChild(el('span', 'q-turn', '裏面あり')); e.appendChild(rq);
     const sig = el('div', 'q-sig'); sig.appendChild(el('span', 'k', '完了時サイン'));
     if (d.signed) sig.appendChild(el('span', 'sig', (d.sig || d.requester) + '〆'));
     e.appendChild(sig);
@@ -702,7 +826,7 @@ function renderLobby() {
   for (const t of S.tables) {
     const b = boothDom[t.i];
     const p = t.party;
-    const key = t.state + '|' + (p ? p.id : '') + '|' + bubbleText(p) + '|' + (p && t.state === 'returned' ? p.members.map(m => m.status).join() : '');
+    const key = t.state + '|' + (p ? p.id : '') + '|' + bubbleText(p) + '|' + (p && t.state === 'returned' ? p.members.map(m => m.status + (m.ail || '')).join() : '');
     if (key !== b.key) {
       b.key = key; b.root.innerHTML = '';
       const plate = el('div', 'plate'); plate.appendChild(el('span', 'no', `テーブル${t.i + 1}`));
@@ -712,7 +836,7 @@ function renderLobby() {
         const party = el('div', 'party');
         if (t.enter) { party.classList.add('enter'); t.enter = false; }
         if (t.state === 'leaving') party.classList.add('leave');
-        for (const m of p.members) party.appendChild(sprite(m.gid, p.returned ? m.status : 'ok', 2));
+        for (const m of p.members) party.appendChild(sprite(m.gid, p.returned ? m.status : 'ok', 2, p.returned && m.status !== 'ghost' ? m.ail : null));
         b.root.appendChild(party);
         const bt = bubbleText(p); if (bt) b.root.appendChild(el('div', 'bubble', bt));
       } else b.root.appendChild(el('div', 'empty-msg', '— 空き —'));
@@ -861,7 +985,7 @@ function showReport() {
     ['来訪したパーティ', st.visitors + '組'], ['閉店で帰したパーティ', st.closedAway + '組'],
     ['認可', st.approved + '件'], ['却下', st.rejected + '件'], ['受注対応のミス', st.recMiss + '件', st.recMiss],
     ['帰還したパーティ', st.returned + '組'], ['戻らなかったパーティ', st.lost + '組', st.lost], ['終了対応のミス', st.retMiss + '件', st.retMiss],
-    ['使った回復ジェル', st.used.gel + '個'], ['使った霊薬', st.used.elixir + '個'],
+    ...V2.ITEMS.map(k => ['使った' + ITEM_NAME[k], st.used[k] + '個']),
     ['運営本部から', st.incomeHQ + 'G'], ['依頼主から', st.incomeOwner + 'G'],
     ['内職（容器の洗浄）', `${st.washBoxes}箱 ${st.incomeSide}G`], ['注文の代金', st.orderCost + 'G'],
     ['クエスト中のパーティ', S.quests.length + S.returnQueue.length + '組'], ['物品棚', `${shelfCount()}/${V2.SHELF_MAX}`],
@@ -1032,14 +1156,14 @@ function takeForm(kind) {
   if (t.objs.some(o => o.tray === kind)) { SFX.deny(); toast('用紙はテーブルに1枚まで出せます'); return; }
   const [w, h] = PAPER[kind];
   const sp = freeSpot(t, w, h);
-  const data = kind === 'apply' ? { checks: { comp: false, short: false, docs: false }, stamps: [] } : { qty: { gel: 0, elixir: 0 }, stamps: [] };
+  const data = kind === 'apply' ? { checks: Object.fromEntries(V2_REASONS.map(r => [r.id, false])), stamps: [] } : { qty: Object.fromEntries(V2.ITEMS.map(k => [k, 0])), stamps: [] };
   addObj(t, { cls: 'paper', doc: kind, tray: kind, x: sp.x, y: sp.y, data, boundTo: null });
   SFX.paper(); dirty();
 }
 // ハンコを押せるか（押すべき物にだけ押せる）
 function stampTarget(tool, o, hit) {
   const t = tbl();
-  if (!o || o.cls !== 'paper') return null;
+  if (!o || o.cls !== 'paper' || o.back) return null;
   const st = o.data.stamps || [];
   if (tool === 'ar') {
     if (t.state === 'reception' && usable(o, t) && !st.some(s => s.t === 'approve' || s.t === 'reject')) { o.boundTo = t.party.id; return o; }
@@ -1187,9 +1311,9 @@ function takeFromBag(what, p) {
 // ③ 乾燥棚 → 作業布 → 合う栓を付ける → 仮置き台 → 乾燥棚が空になったら箱に詰める → 箱が閉じて手間賃
 const WK = 3;                                     // 素材の表示倍率
 const WBW = 16 * WK, WBH = 20 * WK;               // 容器の表示サイズ
-const WB_CORK = { gel: [2, 3], elixir: [4, 5] };  // 容器の絵の中での栓とタグの位置（素材の座標）
-const WB_TAG = { gel: [11, 7], elixir: [9, 9] };
-const CORK_SZ = { gel: [12, 4], elixir: [7, 6] };
+const WB_CORK = { gel: [2, 3], elixir: [4, 5], whale: [5, 3] };  // 容器の絵の中での栓とタグの位置（素材の座標）
+const WB_TAG = { gel: [11, 7], elixir: [9, 9], whale: [10, 8] };
+const CORK_SZ = { gel: [12, 4], elixir: [7, 6], whale: [6, 6] };
 const WL = {
   rbox: { x: 14, y: 34, w: 180, h: 132 },
   mat: { x: 206, y: 32, w: 144, h: 152 },
@@ -1216,7 +1340,7 @@ const WDESC = {
 function newWash() { return { stage: 1, mat: null, rack: Array(10).fill(null), tray: Array(10).fill(null), temp: Array(10).fill(null), box: [], cycles: 0 }; }
 const W = () => S.wash;
 const boxOpen = () => W().stage === 3 && W().rack.every(k => !k);
-const randKind = () => Math.random() < V2.NAISHOKU.elixirRate ? 'elixir' : 'gel';
+const randKind = () => weighted(V2.NAISHOKU.kinds);
 function washHint() {
   const w = W(), m = w.mat;
   if (w.stage === 1) {
@@ -1355,7 +1479,7 @@ function washUp(pr, e) {
 }
 function washDesc(key) {
   if (key === 'mat-bottle') {
-    const m = W().mat; const nm = m.kind === 'gel' ? '回復ジェルの容器' : '霊薬の容器';
+    const m = W().mat; const nm = ITEM_NAME[m.kind] + 'の容器';
     return W().stage === 3 ? `${nm}：${m.cork ? '仮置き台へ' : '合う栓を付ける'}` : `${nm}：${m.tag || m.cork ? 'タグと栓を外す' : m.rinse < 1 ? '桶に入れて左右に振る' : m.wipe < 1 ? '布でこすって拭く' : '乾燥棚へ'}`;
   }
   return WDESC[key] || '';
@@ -1632,8 +1756,8 @@ function frame(t) {
   render();
   requestAnimationFrame(frame);
 }
-Promise.all([loadImg('adv', 'img/adventurers.png'), loadImg('bandage', 'img/bandage.png')]).then(() => { setup(); requestAnimationFrame(frame); });
+Promise.all([loadImg('adv', 'img/adventurers.png'), loadImg('bandage', 'img/bandage.png'), ...AILMENTS.map(a => loadImg('ail_' + a, `img/ail_${a}.png`))]).then(() => { setup(); requestAnimationFrame(frame); });
 
 // 動作確認用
-window.__v2 = { S, update, dirty, knowable, hasDocDefect, finishReception, tbl, startDay, toNight, nextDay, selectTable, openPersonal, stepSet, newWash };
+window.__v2 = { S, update, dirty, knowable, hasDocDefect, finishReception, finishReturn, tbl, startDay, toNight, nextDay, selectTable, openPersonal, stepSet, newWash, genParty, genQuest, categoryOf, requiredItems, extAttr, ailCandidates, seatReturn };
 })();

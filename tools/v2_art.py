@@ -104,6 +104,46 @@ MINI = {
         ".VVVVVV.",
         "........",
     ],
+    "whale": [
+        "...MM...",
+        "...VV...",
+        "..VUUV..",
+        ".VUwUUV.",
+        ".VUYYuV.",
+        ".VUuuuV.",
+        "..VVVV..",
+        "........",
+    ],
+    "candy": [
+        "........",
+        "o.OOOO.o",
+        "OoOwOOoO",
+        "OoOOOOoO",
+        "OoOOOooO",
+        "o.oooo.o",
+        "........",
+        "........",
+    ],
+    "bband": [
+        "........",
+        "..QQQQ..",
+        ".QqqqqQ.",
+        ".QqqGqQ.",
+        ".QqGqqQ.",
+        ".QqqqqQ.",
+        "..QQQQ..",
+        "........",
+    ],
+    "neut": [
+        "..p..p..",
+        "...pp...",
+        "..HHHH..",
+        ".HHPHHH.",
+        ".HPPPHH.",
+        ".HHHHHP.",
+        "..PPPP..",
+        "........",
+    ],
     "elixir": [
         "...gG...",
         "...VV...",
@@ -163,7 +203,7 @@ def main():
         outline(b).save(os.path.join(IMG, f"box_{k}_back.png")); f.save(os.path.join(IMG, f"box_{k}_front.png"))
         boxes[k] = (b, f, inner)
     if len(sys.argv) > 2 and sys.argv[1] == "--preview":
-        sheet = Image.new("RGBA", (700, 220), (90, 80, 70, 255))
+        sheet = Image.new("RGBA", (1000, 220), (90, 80, 70, 255))
         x = 10
         for k in STAMPS:
             sheet.alpha_composite(out[k].resize((96, 96), Image.NEAREST), (x, 10)); x += 110
